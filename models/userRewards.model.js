@@ -76,3 +76,5 @@ const userRewardsSchema = new mongoose.Schema({
       },
 
 });
+
+export default mongoose.model("UserRewards", userRewardsSchema) || mongoose.models.UserRewards;

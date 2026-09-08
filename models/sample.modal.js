@@ -16,7 +16,6 @@ const otpSchema = new mongoose.Schema({
       },
       name: {
             type: String,
-            required: true
       },
       avatarUrl: {
             type: String,

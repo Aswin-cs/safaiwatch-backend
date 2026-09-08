@@ -33,6 +33,7 @@ export const signUpCompletionSchema = z.object({
     .enum(["email", "google"]).default("email"),
   providerId: z
     .string().default("email123"),
+  avatarUrl: z.string().optional(),
 });
 
 export const signUpSchema = z.object({

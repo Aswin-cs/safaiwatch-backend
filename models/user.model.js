@@ -17,9 +17,19 @@ const userSchema = new mongoose.Schema({
             enum: ['Civilian', 'Coordinator', 'Hybrid'],
             default: 'Civilian'
       },
-      avatarUrl: {
-            type: String,
-            default: ''
+      avatar: {
+            type: {
+                  url: {
+                        type: String
+                  },
+                  id: {
+                        type: String
+                  }
+            },
+            default: {
+                  url: '',
+                  id: ''
+            }
       },
       certificatePreferences: {
             includePhoto: { type: Boolean, default: true },

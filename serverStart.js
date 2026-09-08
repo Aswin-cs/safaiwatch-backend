@@ -1,12 +1,14 @@
 import express from 'express';
 import app from './src/app.js';
 import { PORT } from './config/envConfig.js';
+import connectDB from './config/connectDb.js';
 const Port = PORT || 5000;
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
-const startServer = () => {
+const startServer = async () => {
       try {
+            await connectDB();
             app.on('error', (err) => {
                   console.error('Server error:', err);
                   throw err; // Rethrow the error to crash the server

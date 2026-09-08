@@ -1,6 +1,7 @@
 import jwt from "jsonwebtoken";
 import { JWT_SECRET, NODE_ENV } from "../../config/envConfig.js";
 import User from "../../models/user.model.js";
+import Otp from "../../models/sample.modal.js";
 import { errorHandler } from "../../utils/errorHandler.js";
 
 export const authorizeMiddleware = (...roles) => {
@@ -19,21 +20,30 @@ export const authorizeMiddleware = (...roles) => {
       }
 
       const user = await User.findById(decodedToken.userId);
+      const otp = await Otp.findById(decodedToken.otpId || decodedToken.userId);
       console.log("User", user);
-      if (!user) {
+      console.log("OTP", otp);
+      if (user && otp) {
         return next(errorHandler(401, "Unauthorized"));
       }
-
-      if (user.accountActive === "ban" || user.accountActive === "blacklist") {
-        return next(errorHandler(403, "Forbidden: Account is restricted"));
+      if (otp && !user) {
+        req.otp = otp;
+        next();
       }
+      else if (user && !otp) {
+        if (user.accountActive === "ban" || user.accountActive === "blacklist") {
+          return next(errorHandler(403, "Forbidden: Account is restricted"));
+        }
 
-      if (roles.length > 0 && !roles.includes(user.role)) {
-        return next(errorHandler(403, "Forbidden"));
+        if (roles.length > 0 && !roles.includes(user.role)) {
+          return next(errorHandler(403, "Forbidden"));
+        }
+
+        req.user = user;
+        next();
+      } else {
+        return next(errorHandler(401, "Unauthorized"));
       }
-
-      req.user = user;
-      next();
     } catch (error) {
       if (error.name === "JsonWebTokenError" || error.name === "TokenExpiredError") {
         return next(errorHandler(401, "Invalid or expired token"));

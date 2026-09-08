@@ -10,6 +10,9 @@ const userStatusSchema = new mongoose.Schema({
             enum: ['Free', 'Assigned', 'Pending', ''],
             default: 'Free'
       },
+      streaks: {
+            type: String
+      },
       currentLocation: {
             type: {
                   type: String,
@@ -24,26 +27,18 @@ const userStatusSchema = new mongoose.Schema({
       MarkedSpots: {
             type: [
                   {
-                        address: {
-                              type: String,
+                        _id: {
+                              type: mongoose.Schema.Types.ObjectId,
+                              ref: 'MarkedSpot'
+                        },
+                        isCompletedBy: {
+                              type: mongoose.Schema.Types.ObjectId,
+                              ref: 'User',
                               required: true
                         },
-                        type: {
-                              type: String,
-                              enum: ['Point'],
-                              required: true
-                        },
-                        coordinates: {
-                              type: [Number],
-                              required: true
-                        },
-                        description: {
-                              type: String,
-                              required: true
-                        },
-                        image: {
-                              type: String,
-                              required: true
+                        markedAt: {
+                              type: Date,
+                              default: Date.now
                         }
                   }
             ],
@@ -52,33 +47,15 @@ const userStatusSchema = new mongoose.Schema({
       AssignedSpots: {
             type: [
                   {
-                        address: {
-                              type: String,
-                              required: true
-                        },
-                        type: {
-                              type: String,
-                              enum: ['Point'],
-                              required: true
-                        },
-                        coordinates: {
-                              type: [Number],
-                              required: true
-                        },
-                        description: {
-                              type: String,
-                              required: true
-                        },
-                        image: {
-                              type: String,
-                              required: true
-                        },
-                        AssignedBy: {
+                        _id: {
                               type: mongoose.Schema.Types.ObjectId,
-                              ref: 'User',
-                              required: true
+                              ref: 'MarkedSpot'
                         },
-                        AssignedAt: {
+                        assignedBy: {
+                              type: mongoose.Schema.Types.ObjectId,
+                              ref: 'User'
+                        },
+                        assignedAt: {
                               type: Date,
                               default: Date.now
                         }
@@ -89,35 +66,18 @@ const userStatusSchema = new mongoose.Schema({
       CompletedSpots: {
             type: [
                   {
-                        address: {
-                              type: String,
+                        _id: {
+                              type: mongoose.Schema.Types.ObjectId,
+                              ref: 'MarkedSpot'
+                        },
+                        assignedBy: {
+                              type: mongoose.Schema.Types.ObjectId,
+                              ref: 'User',
                               required: true
                         },
-                        type: {
-                              type: String,
-                              enum: ['Point'],
-                              required: true
-                        },
-                        coordinates: {
-                              type: [Number],
-                              required: true
-                        },
-                        description: {
-                              type: String,
-                              required: true
-                        },
-                        image: {
-                              type: String,
-                              required: true
-                        },
-                        CompletedAt: {
+                        completedAt: {
                               type: Date,
                               default: Date.now
-                        },
-                        rating: {
-                              type: Number,
-                              enum: [1, 2, 3, 4, 5],
-                              required: true
                         }
                   }
             ],
@@ -179,4 +139,4 @@ const userStatusSchema = new mongoose.Schema({
       }
 }, { timestamps: true });
 
-export const UserStatus = mongoose.model("UserStatus", userStatusSchema);
+export default mongoose.model("UserStatus", userStatusSchema) || mongoose.models.UserStatus;
