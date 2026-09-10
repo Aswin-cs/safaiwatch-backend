@@ -35,7 +35,7 @@ export const authorizeMiddleware = (...roles) => {
           return next(errorHandler(403, "Forbidden: Account is restricted"));
         }
 
-        if (roles.length > 0 && !roles.includes(user.role)) {
+        if (roles.length > 0 && !roles.some((r) => r.toLowerCase() === user.role?.toLowerCase())) {
           return next(errorHandler(403, "Forbidden"));
         }
 

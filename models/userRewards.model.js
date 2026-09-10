@@ -9,6 +9,10 @@ const userRewardsSchema = new mongoose.Schema({
             type: Number,
             default: 0
       },
+      SellingPoints: {
+            type: Number,
+            default: 0
+      },
       totalSpotsCompleted: {
             type: Number,
             default: 0
@@ -18,7 +22,7 @@ const userRewardsSchema = new mongoose.Schema({
                   {
                         name: {
                               type: String,
-                              enum: ["bronze", "silver", "gold", "platinum"],
+                              enum: ["The Beginner", "The Explorer", "The Hero", "The Icon", "The King", "The Legend"],
                               required: true
                         },
                         dateEarned: {
@@ -61,11 +65,6 @@ const userRewardsSchema = new mongoose.Schema({
             ],
             default: []
       },
-      rank: {
-            type: String,
-            enum: ["Seedling", "Sapling", "Tree", "Forest"],
-            default: "Seedling"
-      },
       lastStreakDate: {
             type: Date,
             default: Date.now
@@ -73,6 +72,18 @@ const userRewardsSchema = new mongoose.Schema({
       currentStreak: {
             type: Number,
             default: 0
+      },
+      longestStreak: {
+            type: Number,
+            default: 0
+      },
+      activeDays: {
+            type: [Date],
+            default: []
+      },
+      freezeShields: {
+            type: Number,
+            default: 1
       },
 
 });

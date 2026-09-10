@@ -3,6 +3,8 @@ import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import authRouter from './routes/auth.routes.js';
 import profileRouter from './routes/profile.routes.js';
+import spotsRouter from './routes/spots.routes.js';
+import feedsRouter from './routes/feeds.routes.js';
 
 
 const app = express();
@@ -23,5 +25,8 @@ app.get('/', (req, res) => {
 
 app.use('/api/v1/auth', authRouter);
 app.use('/api/v1/profile', profileRouter);
+app.use('/api/v1/spots', spotsRouter);
+app.use('/api/v1/feeds', feedsRouter);
+app.use('/feed', feedsRouter);
 
 export default app;

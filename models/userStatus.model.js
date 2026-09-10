@@ -11,7 +11,7 @@ const userStatusSchema = new mongoose.Schema({
             default: 'Free'
       },
       streaks: {
-            type: String
+            type: Number
       },
       currentLocation: {
             type: {
@@ -127,10 +127,6 @@ const userStatusSchema = new mongoose.Schema({
             default: 0
       },
       assignedCount: {
-            type: Number,
-            default: 0
-      },
-      totalCount: {
             type: Number,
             default: 0
       },

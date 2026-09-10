@@ -23,6 +23,18 @@ const markedSpotsSchema = new mongoose.Schema(
                   type: String,
                   required: true
             },
+            imageId: {
+                  type: String,
+                  required: true
+            },
+            completedImage: {
+                  type: String,
+                  required: false
+            },
+            completedImageId: {
+                  type: String,
+                  required: false
+            },
             markedBy: {
                   type: mongoose.Schema.Types.ObjectId,
                   ref: 'User',
@@ -72,7 +84,7 @@ const markedSpotsSchema = new mongoose.Schema(
             rating: {
                   type: Number,
                   enum: [1, 2, 3, 4, 5],
-                  default: 0
+                  default: 1
             }
       }
 )
