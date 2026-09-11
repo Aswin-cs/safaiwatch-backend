@@ -63,6 +63,25 @@ const userStatusSchema = new mongoose.Schema({
             ],
             default: []
       },
+      DeletedSpots: {
+            type: [
+                  {
+                        _id: {
+                              type: mongoose.Schema.Types.ObjectId,
+                              ref: 'MarkedSpot'
+                        },
+                        deletedBy: {
+                              type: mongoose.Schema.Types.ObjectId,
+                              ref: 'User'
+                        },
+                        deletedAt: {
+                              type: Date,
+                              default: Date.now
+                        }
+                  }
+            ],
+            default: []
+      },
       CompletedSpots: {
             type: [
                   {
@@ -115,6 +134,10 @@ const userStatusSchema = new mongoose.Schema({
             default: []
       },
       BlackListCount: {
+            type: Number,
+            default: 0
+      },
+      howManyTimesDeletedSpots: {
             type: Number,
             default: 0
       },

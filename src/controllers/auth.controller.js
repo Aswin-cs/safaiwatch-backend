@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 import User from "../../models/user.model.js";
 import Otp from "../../models/sample.modal.js";
 import jwt from "jsonwebtoken";
-import { signUpCompletionSchema, signInSchema, signUpSchema } from "../validators/auth.validator.js";
+import { signUpCompletionSchema, signInSchema, signUpSchema, isUniqueUsernameSchema } from "../validators/auth.validator.js";
 import { JWT_SECRET, NODE_ENV } from "../../config/envConfig.js";
 import { oauth2Client, SCOPES } from "../../config/oauth.js";
 import { google } from "googleapis";
@@ -107,7 +107,7 @@ export const handleGoogleCallback = async (req, res, next) => {
 const signUpCompletion = async (req, res, next) => {
       const session = await mongoose.startSession();
       try {
-            const { provider, email } = req.body;
+            const { provider, email, username } = req.body;
             const otpUser = await Otp.findOne({ email, otpVerified: true });
             if (!otpUser) {
                   return res.status(400).json({
@@ -115,7 +115,7 @@ const signUpCompletion = async (req, res, next) => {
                         message: "User not found"
                   });
             }
-            const userExists = await User.findOne({ email, Accprovider: provider, isVerified: true, isProfileCompleted: true })
+            const userExists = await User.findOne({ email, username, Accprovider: provider, isVerified: true, isProfileCompleted: true })
             if (userExists) {
                   return res.status(400).json({
                         success: false,
@@ -208,7 +208,7 @@ const signUpCompletion = async (req, res, next) => {
             }
 
             session.startTransaction();
-            let { username, pincode, address, role, geolocation, providerId, avatarUrl } = req.body;
+            let { pincode, address, role, geolocation, providerId, avatarUrl } = req.body;
             if (typeof geolocation === "string") {
                   try {
                         geolocation = JSON.parse(geolocation);
@@ -420,9 +420,12 @@ const verifyOtpSignUP = async (req, res, next) => {
                   });
             }
             await Otp.findOneAndUpdate({ email, otp }, { otpVerified: true });
+            setUncompletedProfileCookie(res, otpUser);
             return res.status(200).json({
                   success: true,
                   message: "Otp verified successfully",
+                  authorizationType: "incomplete",
+                  isProfileCompleted: false,
                   user: {
                         email: otpUser.email,
                   },
@@ -549,6 +552,7 @@ const getMe = async (req, res, next) => {
             if (req.user) {
                   return res.status(200).json({
                         success: true,
+                        authorizationType: "normal",
                         isProfileCompleted: true,
                         user: req.user,
                   });
@@ -556,6 +560,7 @@ const getMe = async (req, res, next) => {
             if (req.otp) {
                   return res.status(200).json({
                         success: true,
+                        authorizationType: "incomplete",
                         isProfileCompleted: false,
                         user: {
                               email: req.otp.email,
@@ -567,6 +572,8 @@ const getMe = async (req, res, next) => {
             }
             return res.status(401).json({
                   success: false,
+                  authorizationType: "none",
+                  isProfileCompleted: false,
                   message: "Unauthorized",
             });
       } catch (error) {
@@ -574,4 +581,35 @@ const getMe = async (req, res, next) => {
       }
 };
 
-export { signUp, signIn, signOut, signUpCompletion, resendSignInOtp, resendSignUpOtp, verifyOtpSignIn, verifyOtpSignUP, getMe };
+const isUniqueUsername = async (req, res, next) => {
+      try {
+            const { username } = req.body;
+            const user = await User.findOne({ username });
+            if (user) {
+                  return res.status(400).json({
+                        success: false,
+                        message: "Username already exists",
+                  });
+            }
+            const validationResult = isUniqueUsernameSchema.safeParse({ username });
+            if (!validationResult.success) {
+                  const formattedErrors = validationResult.error.errors.map((err) => ({
+                        field: err.path.join("."),
+                        message: err.message,
+                  }));
+                  return res.status(400).json({
+                        success: false,
+                        message: "Validation Error",
+                        errors: formattedErrors,
+                  });
+            }
+            return res.status(200).json({
+                  success: true,
+                  message: "Username is unique",
+            });
+      } catch (error) {
+            next(error);
+      }
+}
+
+export { signUp, signIn, signOut, signUpCompletion, resendSignInOtp, resendSignUpOtp, verifyOtpSignIn, verifyOtpSignUP, getMe, isUniqueUsername };

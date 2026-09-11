@@ -5,7 +5,8 @@ export const signUpCompletionSchema = z.object({
     .string({ required_error: "Username is required" })
     .trim()
     .min(3, { message: "Username must be at least 3 characters long" })
-    .max(30, { message: "Username must not exceed 30 characters" }),
+    .max(30, { message: "Username must not exceed 30 characters" })
+    .regex(/^[a-zA-Z0-9_]+$/, { message: "Username can only contain letters, numbers, and underscores" }),
   email: z
     .string({ required_error: "Email is required" })
     .trim()
@@ -48,4 +49,13 @@ export const signInSchema = z.object({
     .string({ required_error: "Email is required" })
     .trim()
     .email({ message: "Invalid email address" })
+});
+
+export const isUniqueUsernameSchema = z.object({
+  username: z
+    .string({ required_error: "Username is required" })
+    .trim()
+    .min(3, { message: "Username must be at least 3 characters long" })
+    .max(30, { message: "Username must not exceed 30 characters" })
+    .regex(/^[a-zA-Z0-9_]+$/, { message: "Username can only contain letters, numbers, and underscores" }),
 });

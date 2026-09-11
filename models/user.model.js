@@ -4,12 +4,42 @@ const userSchema = new mongoose.Schema({
       username: {
             type: String,
             required: true,
-
+            unique: true,
+            lowercase: true,
+            trim: true,
+      },
+      previousUsernames: {
+            type: [{
+                  username: {
+                        type: String,
+                        trim: true,
+                  },
+                  changedAt: {
+                        type: Date,
+                        default: Date.now
+                  }
+            }]
+      },
+      previousAvatar: {
+            type: [{
+                  url: {
+                        type: String
+                  },
+                  id: {
+                        type: String
+                  },
+                  changedAt: {
+                        type: Date,
+                        default: Date.now
+                  }
+            }],
       },
       email: {
             type: String,
             required: true,
-            unique: true
+            unique: true,
+            lowercase: true,
+            trim: true,
       },
       role: {
             type: String,

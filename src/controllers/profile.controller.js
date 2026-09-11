@@ -8,6 +8,7 @@ import { errorHandler } from "../../utils/errorHandler.js";
 import { responseHandler } from "../../utils/responseHandler.js";
 import { JWT_SECRET } from "../../config/envConfig.js";
 import jwt from "jsonwebtoken";
+import { uploadToCloudinary, deleteFromCloudinary } from "../../utils/Cloudinaryimage.utils.js";
 
 const getWeekDays = (userActiveDays = [], userStatus = null) => {
       const now = new Date();
@@ -26,7 +27,7 @@ const getWeekDays = (userActiveDays = [], userStatus = null) => {
                         try {
                               const str = new Date(d).toISOString().split("T")[0];
                               activeDatesSet.add(str);
-                        } catch (e) {}
+                        } catch (e) { }
                   }
             });
       }
@@ -36,21 +37,21 @@ const getWeekDays = (userActiveDays = [], userStatus = null) => {
                   if (s && s.markedAt) {
                         try {
                               activeDatesSet.add(new Date(s.markedAt).toISOString().split("T")[0]);
-                        } catch (e) {}
+                        } catch (e) { }
                   }
             });
             (userStatus.AssignedSpots || []).forEach((s) => {
                   if (s && s.assignedAt) {
                         try {
                               activeDatesSet.add(new Date(s.assignedAt).toISOString().split("T")[0]);
-                        } catch (e) {}
+                        } catch (e) { }
                   }
             });
             (userStatus.CompletedSpots || []).forEach((s) => {
                   if (s && s.completedAt) {
                         try {
                               activeDatesSet.add(new Date(s.completedAt).toISOString().split("T")[0]);
-                        } catch (e) {}
+                        } catch (e) { }
                   }
             });
       }
@@ -349,21 +350,19 @@ export const getBasicInfo = async (req, res, next) => {
       }
 };
 
-export const getProfileById = async (req, res, next) => {
-      let profileId = req.params.id;
-      if (typeof profileId === "string" && profileId.startsWith("@")) {
-            profileId = profileId.slice(1);
+export const getProfileByUsername = async (req, res, next) => {
+      let profileUsername = req.params.username || req.params.id;
+      if (typeof profileUsername === "string" && profileUsername.startsWith("@")) {
+            profileUsername = profileUsername.slice(1);
       }
       try {
             let user = null;
-            if (mongoose.Types.ObjectId.isValid(profileId)) {
-                  user = await User.findById(profileId);
-            }
+            user = await User.findOne({ username: new RegExp(`^${profileUsername}$`, "i") });
             if (!user) {
-                  user = await User.findOne({ username: new RegExp(`^${profileId}$`, "i") });
+                  user = await User.findOne({ username: profileUsername });
             }
-            if (!user) {
-                  user = await User.findOne({ username: profileId });
+            if (!user && mongoose.Types.ObjectId.isValid(profileUsername)) {
+                  user = await User.findById(profileUsername);
             }
             if (!user) {
                   return next(errorHandler(404, "User not found"));
@@ -631,7 +630,7 @@ export const getUserHistory = async (req, res, next) => {
                   }
             });
             const markedSpots = Array.from(markedMap.values()).map((s) => ({
-                  id: String(s._id),
+                  id: `${String(s._id)}-marked`,
                   type: "marked",
                   category: "Marked Spot",
                   title: s.description || s.address || "Reported Trash Spot",
@@ -661,7 +660,7 @@ export const getUserHistory = async (req, res, next) => {
                   }
             });
             const completedSpots = Array.from(completedMap.values()).map((s) => ({
-                  id: String(s._id),
+                  id: `${String(s._id)}-completed`,
                   type: "completed",
                   category: "Completed Spot",
                   title: s.description || s.address || "Cleaned & Resolved Spot",
@@ -683,7 +682,7 @@ export const getUserHistory = async (req, res, next) => {
             const assignedSpots = assignedSpotsList.map((item) => {
                   const s = item._id || item;
                   return {
-                        id: String(s._id || item._id),
+                        id: `${String(s._id || item._id)}-assigned`,
                         type: "assigned",
                         category: "Assigned Spot",
                         title: s.description || s.address || "Assigned Civic Cleanup",
@@ -707,7 +706,7 @@ export const getUserHistory = async (req, res, next) => {
                   .map((item) => {
                         const post = item.postId;
                         return {
-                              id: String(post._id),
+                              id: `${String(post._id)}-liked`,
                               type: "liked_post",
                               category: "Liked Post",
                               title: post.postName || post.description || "Liked Feed Post",
@@ -738,7 +737,7 @@ export const getUserHistory = async (req, res, next) => {
                   }
             });
             const linkedPosts = Array.from(linkedMap.values()).map((post) => ({
-                  id: String(post._id),
+                  id: `${String(post._id)}-linked`,
                   type: "linked_post",
                   category: "Linked Post",
                   title: post.postName || post.description || "Tagged Cleanup Post",
@@ -786,3 +785,153 @@ export const getUserHistory = async (req, res, next) => {
             return next(errorHandler(500, error.message || "Internal Server Error"));
       }
 };
+
+/**
+ * Controller to update profile details (avatar and username only)
+ */
+export const updateProfile = async (req, res, next) => {
+      try {
+            const user = req.user;
+            if (!user) {
+                  return next(errorHandler(401, "Unauthorized"));
+            }
+
+            const { username, avatarUrl } = req.body || {};
+            let isUpdated = false;
+
+            // 1. Handle Username Update
+            if (username && typeof username === "string") {
+                  const trimmedUsername = username.trim().toLowerCase();
+                  if (trimmedUsername !== user.username.toLowerCase()) {
+                        if (trimmedUsername.length < 3 || trimmedUsername.length > 30) {
+                              return res.status(400).json({
+                                    success: false,
+                                    message: "Username must be between 3 and 30 characters.",
+                              });
+                        }
+                        const usernameRegex = /^[a-zA-Z0-9_]+$/;
+                        if (!usernameRegex.test(trimmedUsername)) {
+                              return res.status(400).json({
+                                    success: false,
+                                    message: "Username can only contain letters, numbers, and underscores.",
+                              });
+                        }
+
+                        const existingUser = await User.findOne({
+                              username: trimmedUsername,
+                              _id: { $ne: user._id },
+                        });
+
+                        if (existingUser) {
+                              return res.status(400).json({
+                                    success: false,
+                                    message: "Username is already taken. Please choose another one.",
+                              });
+                        }
+                        if (user.previousUsernames.length >= 5) {
+                              user.previousUsernames.shift();
+                        }
+                        user.previousUsernames.push({
+                              username: user.username,
+                              changedAt: Date.now()
+                        });
+                        user.username = trimmedUsername;
+                        isUpdated = true;
+                  }
+            }
+
+            // 2. Handle Avatar Update (File Upload or Data URL / Image URL)
+            if (req.file) {
+                  let fileInput = req.file;
+                  if (req.file.buffer) {
+                        const b64 = Buffer.from(req.file.buffer).toString("base64");
+                        fileInput = `data:${req.file.mimetype};base64,${b64}`;
+                  }
+
+                  try {
+                        if (user.avatar?.id) {
+                              try {
+                                    await deleteFromCloudinary(user.avatar.id);
+                              } catch (e) {
+                                    console.warn("Old avatar deletion warning:", e);
+                              }
+                        }
+                        const result = await uploadToCloudinary(fileInput, "Safaiwatch_avatars");
+                        if (user.previousAvatar.length >= 5) {
+                              user.previousAvatar.shift();
+                        }
+                        user.previousAvatar.push({
+                              url: user.avatar.url,
+                              id: user.avatar.id,
+                              changedAt: Date.now()
+                        });
+                        user.avatar = {
+                              url: result.secure_url,
+                              id: result.public_id
+                        };
+                        isUpdated = true;
+                  } catch (err) {
+                        console.error("Cloudinary upload error in updateProfile:", err);
+                        return res.status(500).json({
+                              success: false,
+                              message: "Failed to upload avatar image to Cloudinary.",
+                        });
+                  }
+            } else if (avatarUrl && typeof avatarUrl === "string" && avatarUrl.trim()) {
+                  const trimmedUrl = avatarUrl.trim();
+                  if (trimmedUrl.startsWith("data:image/")) {
+                        try {
+                              if (user.avatar?.id) {
+                                    try {
+                                          await deleteFromCloudinary(user.avatar.id);
+                                    } catch (e) {
+                                          console.warn("Old avatar deletion warning:", e);
+                                    }
+                              }
+                              const result = await uploadToCloudinary(trimmedUrl, "Safaiwatch_avatars");
+                              user.avatar = {
+                                    url: result.secure_url,
+                                    id: result.public_id,
+                              };
+                              isUpdated = true;
+                        } catch (err) {
+                              console.error("Cloudinary upload error in updateProfile:", err);
+                              return res.status(500).json({
+                                    success: false,
+                                    message: "Failed to upload avatar image to Cloudinary.",
+                              });
+                        }
+                  } else if (trimmedUrl !== user.avatar?.url) {
+                        user.avatar = {
+                              url: trimmedUrl,
+                              id: "",
+                        };
+                        isUpdated = true;
+                  }
+            }
+
+            if (isUpdated) {
+                  await user.save();
+            }
+
+            const updatedAvatarUrl = user.avatar?.url || "";
+
+            return responseHandler(res, 200, "Profile updated successfully.", {
+                  user: {
+                        _id: user._id,
+                        username: user.username,
+                        email: user.email,
+                        role: user.role,
+                        avatar: user.avatar,
+                        avatarUrl: updatedAvatarUrl,
+                        isProfileCompleted: user.isProfileCompleted,
+                  },
+            });
+      } catch (error) {
+            console.error("Error in updateProfile:", error);
+            return next(errorHandler(500, error.message || "Internal Server Error"));
+      }
+};
+
+export const getProfileById = getProfileByUsername;
+

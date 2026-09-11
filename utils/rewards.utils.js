@@ -44,6 +44,10 @@ const rewardsCalculating = async (userId, detailsOfCompletingTheSpot, which) => 
                         karmaInc = 15;
                         sellingInc = 15;
                   }
+                  else if (spot.critcal === "Low") {
+                        karmaInc = 5;
+                        sellingInc = 5;
+                  }
 
                   await UserRewards.findOneAndUpdate(
                         { user: spot.markedBy },
