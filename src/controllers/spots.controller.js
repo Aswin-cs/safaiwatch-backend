@@ -14,6 +14,7 @@ import {
       streaksCalculated,
 } from "../../utils/rewards.utils.js";
 import markedSpotsModel from "../../models/markedSpots.model.js";
+import { getIo } from "../../config/socketIoConfig.js";
 
 /**
  * Helper to upload image file or base64 data to Cloudinary if provided
@@ -162,6 +163,14 @@ export const markSpot = async (req, res, next) => {
                         console.error("Background reward calculation error in markSpot:", rewardErr);
                   }
             })();
+
+            try {
+                  getIo().emit("spot:created", {
+                        spot: populatedSpot || savedSpot,
+                  });
+            } catch (socketErr) {
+                  console.error("Socket emit error in markSpot:", socketErr);
+            }
 
             return responseHandler(res, 201, "Spot marked successfully", {
                   spot: populatedSpot || savedSpot,
@@ -407,6 +416,9 @@ export const deleteSpot = async (req, res, next) => {
             if (!creatorStatus) {
                   creatorStatus = new UserStatus({ user: userId });
             }
+            if (creatorStatus.DeletedSpots.length >= 5) {
+                  return responseHandler(res, 400, "You have exceeded the maximum number of deleted spots. You can delete only 5 spots");
+            }
 
             // Pull spot from MarkedSpots, AssignedSpots, CompletedSpots
             creatorStatus.MarkedSpots.pull(spotId);
@@ -468,6 +480,12 @@ export const deleteSpot = async (req, res, next) => {
             await session.commitTransaction();
             await session.endSession();
 
+            try {
+                  getIo().emit("spot:deleted", { spotId });
+            } catch (socketErr) {
+                  console.error("Socket emit error in deleteSpot:", socketErr);
+            }
+
             return responseHandler(res, 200, "Spot deleted successfully");
       } catch (error) {
             if (session.inTransaction()) {
@@ -482,6 +500,19 @@ export const deleteSpot = async (req, res, next) => {
  * Assign a spot to a user/coordinator
  * PATCH /api/v1/spots/:id/assign
  */
+/**
+ * Helper: Get max allowed assignments based on criticality level
+ */
+const getMaxAssignments = (critcal) => {
+      switch (critcal) {
+            case 'Very High': return 4;
+            case 'High': return 3;
+            case 'Medium': return 2;
+            case 'Low':
+            default: return 1;
+      }
+};
+
 export const assignSpot = async (req, res, next) => {
       const session = await mongoose.startSession();
       try {
@@ -499,6 +530,11 @@ export const assignSpot = async (req, res, next) => {
                   return next(errorHandler(404, "Spot not found"));
             }
 
+            // Cannot assign a completed/closed spot
+            if (spot.isCompleted) {
+                  return next(errorHandler(400, "Bad Request: This spot is already completed and closed. No further assignments allowed."));
+            }
+
             // Only Coordinator or Hybrid roles can assign spots
             const userRole = req.user?.role;
             if (!["Coordinator", "Hybrid"].includes(userRole)) {
@@ -508,6 +544,21 @@ export const assignSpot = async (req, res, next) => {
             // The user who marked the spot cannot assign it to themselves
             if (spot.markedBy.toString() === assignedByUserId.toString()) {
                   return next(errorHandler(403, "Forbidden: You cannot assign a spot that you reported yourself"));
+            }
+
+            // Prevent duplicate assignment of the same user
+            const alreadyAssigned = (spot.isAssignedBy || []).some(
+                  (entry) => entry.assignedBy && entry.assignedBy.toString() === assignedByUserId.toString()
+            );
+            if (alreadyAssigned) {
+                  return next(errorHandler(400, "You are already assigned to this spot."));
+            }
+
+            // Enforce criticality-based assignment limit
+            const maxAssignments = getMaxAssignments(spot.critcal);
+            const currentAssignmentCount = (spot.isAssignedBy || []).length;
+            if (currentAssignmentCount >= maxAssignments) {
+                  return next(errorHandler(400, `Assignment limit reached. This spot (${spot.critcal || 'Low'} criticality) allows a maximum of ${maxAssignments} assigned user(s).`));
             }
 
             session.startTransaction();
@@ -548,8 +599,23 @@ export const assignSpot = async (req, res, next) => {
             await session.commitTransaction();
             await session.endSession();
 
+            // Re-populate so response includes full assignment details
+            const populatedSpot = await MarkedSpot.findById(spotId)
+                  .populate("markedBy", "_id username avatar role email")
+                  .populate("isAssignedBy.assignedBy", "_id username avatar role email");
+
+            try {
+                  getIo().emit("spot:assigned", {
+                        spot: populatedSpot || spot,
+                  });
+            } catch (socketErr) {
+                  console.error("Socket emit error in assignSpot:", socketErr);
+            }
+
             return responseHandler(res, 200, "Spot assigned successfully", {
-                  spot,
+                  spot: populatedSpot || spot,
+                  maxAssignments,
+                  currentAssignments: (spot.isAssignedBy || []).length,
             });
       } catch (error) {
             if (session.inTransaction()) {
@@ -583,15 +649,12 @@ export const completeSpot = async (req, res, next) => {
                   return next(errorHandler(400, "Spot has already been completed"));
             }
 
-            // Only Coordinator or Hybrid roles can complete spots
-            const userRole = req.user?.role;
-            if (!["Coordinator", "Hybrid"].includes(userRole)) {
-                  return next(errorHandler(403, "Forbidden: Only Coordinators or Hybrid users can complete spots"));
-            }
-
-            // The user who marked the spot cannot complete it themselves
-            if (spot.markedBy.toString() === userId.toString()) {
-                  return next(errorHandler(403, "Forbidden: You cannot complete a spot that you reported yourself"));
+            // Only users who are assigned to this spot can complete it
+            const isUserAssigned = (spot.isAssignedBy || []).some(
+                  (entry) => entry.assignedBy && entry.assignedBy.toString() === userId.toString()
+            );
+            if (!isUserAssigned) {
+                  return next(errorHandler(403, "Forbidden: Only assigned users can clean or complete this spot. You must first claim/assign yourself to this spot."));
             }
 
             const completedUploadRes = await handleImageUpload(req, "SafaiWatch_completed_spots");
@@ -732,8 +795,21 @@ export const completeSpot = async (req, res, next) => {
                   }
             })();
 
+            const populatedCompletedSpot = await MarkedSpot.findById(spot._id)
+                  .populate("markedBy", "_id username avatar role email")
+                  .populate("isAssignedBy.assignedBy", "_id username avatar role email")
+                  .populate("isCompletedBy.completedBy", "_id username avatar role email");
+
+            try {
+                  getIo().emit("spot:completed", {
+                        spot: populatedCompletedSpot || spot,
+                  });
+            } catch (socketErr) {
+                  console.error("Socket emit error in completeSpot:", socketErr);
+            }
+
             return responseHandler(res, 200, "Spot marked as completed successfully", {
-                  spot,
+                  spot: populatedCompletedSpot || spot,
                   karmaEarned: 150,
                   newKarmaPoints: userRewards.karmaPoints,
                   rank: userRewards.rank,

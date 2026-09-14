@@ -11,6 +11,7 @@
   "author": "aswin",
   "license": "ISC",
   "dependencies": {
+    "@google/genai": "^2.22.0",
     "cloudinary": "^2.11.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
@@ -21,6 +22,7 @@
     "mongoose": "^9.9.4",
     "multer": "^2.3.0",
     "nodemon": "^3.1.14",
+    "socket.io": "^4.8.3",
     "zod": "^4.5.4"
   }
 }
