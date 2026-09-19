@@ -14,3 +14,6 @@ export const GOOGLE_CALLBACK_URL = cleanEnv(process.env.GOOGLE_CALLBACK_URL);
 export const CLOUDINARY_NAME = cleanEnv(process.env.CLOUDINARY_NAME);
 export const CLOUDINARY_API_KEY = cleanEnv(process.env.CLOUDINARY_API_KEY);
 export const CLOUDINARY_API_SECRET = cleanEnv(process.env.CLOUDINARY_API_SECRET);
+export const GEMINI_API_KEY = cleanEnv(process.env.GEMINI_API_KEY);
+export const GEMINI_MODEL = cleanEnv(process.env.GEMINI_MODEL) || "gemini-3.6-flash";
+

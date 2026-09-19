@@ -85,6 +85,56 @@ const markedSpotsSchema = new mongoose.Schema(
                   type: Number,
                   enum: [1, 2, 3, 4, 5],
                   default: 1
+            },
+            isAiVerified: {
+                  type: [{
+                        isAiOrEdited: {
+                              type: Boolean,
+                              default: false
+                        },
+                        forensicConfidence: {
+                              type: Number,
+                              default: 0
+                        },
+                        detectedManipulationType: {
+                              type: String,
+                              default: ''
+                        },
+                        forensicDetails: {
+                              type: String,
+                              default: ''
+                        },
+                        gestureMatched: {
+                              type: Boolean,
+                              default: false
+                        },
+                        isValidWasteReport: {
+                              type: Boolean,
+                              default: false
+                        },
+                        isFraudulent: {
+                              type: Boolean,
+                              default: false
+                        },
+                        fraudReason: {
+                              type: String,
+                              default: ''
+                        },
+                        auditResult: {
+                              type: Object,
+                              default: {}
+                        },
+                        verifiedBy: {
+                              type: mongoose.Schema.Types.ObjectId,
+                              ref: 'User',
+                              required: true
+                        },
+                        verifiedAt: {
+                              type: Date,
+                              default: Date.now
+                        }
+                  }],
+                  default: []
             }
       }
 )

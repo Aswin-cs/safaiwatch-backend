@@ -13,8 +13,8 @@ import {
       leaderboardRankCalculated,
       streaksCalculated,
 } from "../../utils/rewards.utils.js";
-import markedSpotsModel from "../../models/markedSpots.model.js";
 import { getIo } from "../../config/socketIoConfig.js";
+import { aiPhotoVerification } from "../../utils/aiPhotoVerification.utils.js";
 
 /**
  * Helper to upload image file or base64 data to Cloudinary if provided
@@ -28,6 +28,19 @@ const handleImageUpload = async (req, defaultFolder = "SafaiWatch_spots") => {
                   const b64 = Buffer.from(req.file.buffer).toString("base64");
                   fileInput = `data:${req.file.mimetype};base64,${b64}`;
             }
+            (async () => {
+                  try {
+                        const isvalid = await aiPhotoVerification(fileInput, req.file.mimetype);
+                        console.log(isvalid)
+                  }
+                  catch (error) {
+                        console.log(error, "error")
+                  }
+                  // if (!isvalid) {
+                  //       await deleteFromCloudinary(fileInput);
+
+                  // }
+            })()
             const uploadRes = await uploadToCloudinary(fileInput, defaultFolder);
             image = uploadRes;
       } else if (image && image.startsWith("data:image/")) {

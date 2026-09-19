@@ -78,12 +78,23 @@ const badgesCalculating = async (user) => {
 
             const existingBadgeNames = (userRewards.badges || []).map((b) => (typeof b === "string" ? b : b.name));
 
+            const BADGE_CONFIG = {
+                  "The Beginner": { icon: "spa", type: "bronze", levelTag: "LV. 1", subtitle: "First Step", description: "Submitted your first verified civic spot report to kick off your sanitation journey." },
+                  "The Explorer": { icon: "explore", type: "bronze", levelTag: "LV. 1", subtitle: "Spot Explorer", description: "Actively mapped and reported 10+ sanitation spots across your local ward." },
+                  "The Spy": { icon: "visibility", type: "silver", levelTag: "LV. 2", subtitle: "Civic Spotter", description: "Kept a vigilant eye on unassigned neighborhood sanitation spots." },
+                  "Eye of the eagle": { icon: "center_focus_strong", type: "silver", levelTag: "LV. 2", subtitle: "Precision Spotter", description: "Demonstrated high accuracy in spot location tagging and coordinator assignment." },
+                  "The Hero": { icon: "shield", type: "silver", levelTag: "LV. 3", subtitle: "Ward Defender", description: "Earned 100+ Karma points by taking active responsibility for ward cleanliness." },
+                  "The Icon": { icon: "workspace_premium", type: "gold", levelTag: "LV. 4", subtitle: "Community Leader", description: "A celebrated civic champion with 200+ Karma points in community service." },
+                  "The King": { icon: "crown", type: "gold", levelTag: "LV. 5", subtitle: "Sanitation King", description: "Crowned Ward Champion with over 400 Karma points and 100+ spot contributions." },
+                  "The Legend": { icon: "auto_awesome", type: "gold", levelTag: "MAX LV.", subtitle: "Civic Legend", description: "Achieved legendary status with 1000+ Karma points and supreme ward leadership." }
+            };
+
             if (markedCount >= 5 && assignedCount <= 10 && !existingBadgeNames.includes("The Spy")) {
-                  userRewards.badges.push({ name: "The Spy", dateEarned: new Date() });
+                  userRewards.badges.push({ name: "The Spy", dateEarned: new Date(), ...(BADGE_CONFIG["The Spy"] || {}) });
                   existingBadgeNames.push("The Spy");
             }
             if (markedCount >= 10 && assignedCount >= 10 && !existingBadgeNames.includes("Eye of the eagle")) {
-                  userRewards.badges.push({ name: "Eye of the eagle", dateEarned: new Date() });
+                  userRewards.badges.push({ name: "Eye of the eagle", dateEarned: new Date(), ...(BADGE_CONFIG["Eye of the eagle"] || {}) });
                   existingBadgeNames.push("Eye of the eagle");
             }
 
@@ -98,7 +109,7 @@ const badgesCalculating = async (user) => {
 
             for (const [cond, name] of badgeRules) {
                   if (cond && !existingBadgeNames.includes(name)) {
-                        userRewards.badges.push({ name, dateEarned: new Date() });
+                        userRewards.badges.push({ name, dateEarned: new Date(), ...(BADGE_CONFIG[name] || {}) });
                         existingBadgeNames.push(name);
                   }
             }
