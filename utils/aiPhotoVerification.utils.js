@@ -3,7 +3,7 @@ import { generateGeminiContent } from "../config/geminiConfig.js";
 import cloudinary from "../config/cloudinaryConfig.js";
 import { urlToGenerativePart } from "./urlToGenerativePart.utils.js";
 
-async function getImageFRomCLoudinary() {
+export async function getImageFRomCLoudinary() {
       const result = await cloudinary.api.resources({
             type: 'upload',
             prefix: 'gestures',   // folder path

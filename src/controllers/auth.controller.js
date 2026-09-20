@@ -3,7 +3,7 @@ import User from "../../models/user.model.js";
 import Otp from "../../models/sample.modal.js";
 import jwt from "jsonwebtoken";
 import { signUpCompletionSchema, signInSchema, signUpSchema, isUniqueUsernameSchema } from "../validators/auth.validator.js";
-import { JWT_SECRET, NODE_ENV } from "../../config/envConfig.js";
+import { JWT_SECRET, NODE_ENV, FRONTEND_URL, GOOGLE_CLIENT_ID } from "../../config/envConfig.js";
 import { oauth2Client, SCOPES } from "../../config/oauth.js";
 import { google } from "googleapis";
 import { generateOTP } from "../../utils/otpGenerator.utils.js";
@@ -49,6 +49,11 @@ const LogoutCookie = (res) => {
 }
 
 export const initiateGoogleAuth = (req, res) => {
+      if (!GOOGLE_CLIENT_ID || GOOGLE_CLIENT_ID === 'your_google_client_id_here') {
+            console.warn("Google Client ID is missing or unconfigured.");
+            const frontend = FRONTEND_URL || "http://localhost:3000";
+            return res.redirect(`${frontend}/login?error=google_config_missing`);
+      }
       const url = oauth2Client.generateAuthUrl({
             access_type: 'offline',
             prompt: 'consent',
@@ -58,49 +63,64 @@ export const initiateGoogleAuth = (req, res) => {
 };
 
 export const handleGoogleCallback = async (req, res, next) => {
+      const frontend = FRONTEND_URL || "http://localhost:3000";
       try {
+            const { code } = req.query;
+            if (!code) {
+                  return res.redirect(`${frontend}/login?error=google_auth_failed`);
+            }
 
-            const { tokens } = await oauth2Client.getToken(req.query.code);
+            const { tokens } = await oauth2Client.getToken(code);
             oauth2Client.setCredentials(tokens);
 
-            const { data: userInfo } = await google.people("v1").people.get({
-                  resourceName: "people/me",
-                  personFields: "names,emailAddresses,photos",
-                  auth: oauth2Client,
-            });
+            const oauth2 = google.oauth2({ version: "v2", auth: oauth2Client });
+            const { data: userInfo } = await oauth2.userinfo.get();
 
-            const email = userInfo.emailAddresses[0].value;
-            let user = await User.findOne({ email, Accprovider: "google", isProfileCompleted: true, isVerified: true });
+            const email = userInfo.email;
+            if (!email) {
+                  return res.redirect(`${frontend}/login?error=google_email_missing`);
+            }
+
+            // Search for existing completed & verified user
+            let user = await User.findOne({ email, isProfileCompleted: true, isVerified: true });
             if (user) {
                   setAuthCookie(res, user);
-                  return res.redirect("/");
+                  return res.redirect(`${frontend}/feed`);
             }
-            if (!user) {
-                  const otpUser = await Otp.create({
+
+            // New or uncompleted user: create/update Otp temp state
+            let otpUser = await Otp.findOne({ email });
+            const name = userInfo.name || email.split("@")[0];
+            const avatarUrl = userInfo.picture || "";
+            const providerId = userInfo.id || email;
+            const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+
+            if (otpUser) {
+                  otpUser.name = name;
+                  otpUser.avatarUrl = avatarUrl;
+                  otpUser.provider = "google";
+                  otpUser.providerId = providerId;
+                  otpUser.otpVerified = true;
+                  otpUser.expiresAt = expiresAt;
+                  await otpUser.save();
+            } else {
+                  otpUser = await Otp.create({
                         email,
-                        name: userInfo.names[0].displayName,
+                        name,
                         otpVerified: true,
-                        avatarUrl: userInfo.photos?.[0]?.url || "",
+                        avatarUrl,
                         provider: "google",
-                        providerId: userInfo.resourceName,
-                  });
-                  setUncompletedProfileCookie(res, otpUser);
-
-                  return res.status(200).json({
-                        success: true,
-                        message: "User registered successfully",
-                        user: {
-                              username: otpUser.name,
-                              email: otpUser.email,
-                              avatarUrl: otpUser.avatarUrl,
-                              provider: otpUser.provider
-                        },
+                        providerId,
+                        expiresAt,
                   });
             }
 
+            setUncompletedProfileCookie(res, otpUser);
+            return res.redirect(`${frontend}/onboarding?email=${encodeURIComponent(email)}&provider=google`);
 
       } catch (error) {
-            next(error);
+            console.error("Google OAuth error:", error);
+            return res.redirect(`${frontend}/login?error=google_auth_failed`);
       }
 };
 
