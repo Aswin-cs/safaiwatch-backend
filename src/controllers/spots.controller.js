@@ -6,6 +6,7 @@ import User from "../../models/user.model.js";
 import Post from "../../models/feeds.model.js";
 import { responseHandler } from "../../utils/responseHandler.js";
 import { errorHandler } from "../../utils/errorHandler.js";
+import OneTime from "../../models/one-time.model.js";
 import { deleteFromCloudinary, uploadToCloudinary } from "../../utils/Cloudinaryimage.utils.js";
 import {
       rewardsCalculating,
@@ -14,7 +15,8 @@ import {
       streaksCalculated,
 } from "../../utils/rewards.utils.js";
 import { getIo } from "../../config/socketIoConfig.js";
-import { aiPhotoVerification } from "../../utils/aiPhotoVerification.utils.js";
+import { aiPhotoVerification, getImageFRomCLoudinary } from "../../utils/aiPhotoVerification.utils.js";
+
 
 /**
  * Helper to upload image file or base64 data to Cloudinary if provided
@@ -36,10 +38,6 @@ const handleImageUpload = async (req, defaultFolder = "SafaiWatch_spots") => {
                   catch (error) {
                         console.log(error, "error")
                   }
-                  // if (!isvalid) {
-                  //       await deleteFromCloudinary(fileInput);
-
-                  // }
             })()
             const uploadRes = await uploadToCloudinary(fileInput, defaultFolder);
             image = uploadRes;
@@ -91,7 +89,7 @@ export const markSpot = async (req, res, next) => {
                   return next(errorHandler(401, "Unauthorized"));
             }
 
-            const { address, description, critical, critcal, type } = req.body;
+            const { address, description, critical, critcal, type, category, wasteCategory, wasteType } = req.body;
 
             if (!address || !description) {
                   return next(errorHandler(400, "Address and description are required fields."));
@@ -114,6 +112,7 @@ export const markSpot = async (req, res, next) => {
             const criticalLevel = critcal || critical || "Low";
             const validCriticalEnum = ["Very High", "High", "Medium", "Low"];
             const finalCritical = validCriticalEnum.includes(criticalLevel) ? criticalLevel : "Low";
+            const finalCategory = category || wasteCategory || wasteType || "Mixed Waste";
 
             session.startTransaction();
 
@@ -122,6 +121,8 @@ export const markSpot = async (req, res, next) => {
                   type: type === "Point" ? "Point" : "Point",
                   coordinates,
                   description,
+                  category: finalCategory,
+                  wasteCategory: finalCategory,
                   image: finalImageUrl,
                   imageId: finalImageId,
                   markedBy: userId,
@@ -347,10 +348,15 @@ export const updateSpot = async (req, res, next) => {
                   return next(errorHandler(403, "Forbidden: You cannot update this spot"));
             }
 
-            const { address, description, critical, critcal, coordinates } = req.body;
+            const { address, description, critical, critcal, coordinates, category, wasteCategory, wasteType } = req.body;
 
             if (address) spot.address = address;
             if (description) spot.description = description;
+            const targetCategory = category || wasteCategory || wasteType;
+            if (targetCategory) {
+                  spot.category = targetCategory;
+                  spot.wasteCategory = targetCategory;
+            }
 
             const targetCritical = critcal || critical;
             if (targetCritical && ["Very High", "High", "Medium", "Low"].includes(targetCritical)) {
@@ -866,6 +872,51 @@ export const rateSpot = async (req, res, next) => {
                   spot,
             });
       } catch (error) {
+            next(error);
+      }
+};
+
+export const getRandomGestureVerification = async (req, res, next) => {
+      try {
+            const userId = req.body?.userId || req.user?._id?.toString() || req.user?.id;
+            const { coordinates } = req.body;
+            if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+                  return next(errorHandler(400, "Invalid user ID"));
+            }
+            if (!coordinates || !Array.isArray(coordinates) || coordinates.length !== 2) {
+                  return next(errorHandler(400, "Invalid coordinates"));
+            }
+            const isValidUser = await User.findById(userId);
+            if (!isValidUser) {
+                  return next(errorHandler(404, "User not found"));
+            }
+            if (isValidUser.role == "Coordinator") {
+                  return next(errorHandler(400, "Coordinator cannot perform this action"));
+            }
+
+            // Remove any old gesture verifications for this user
+            await OneTime.deleteMany({ user: userId });
+
+            // get the random gesture
+            const imageUrl = await getImageFRomCLoudinary();
+
+            if (!imageUrl) {
+                  return next(errorHandler(404, "Image not found"));
+            }
+            const randomVerification = new OneTime({
+                  user: userId,
+                  guestureImage: imageUrl,
+                  coordinates: coordinates,
+                  expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+            });
+            await randomVerification.save();
+
+            return responseHandler(res, 200, "Random gesture verification sent successfully", {
+                  imageId: randomVerification._id,
+                  imageUrl: imageUrl
+            });
+      } catch (error) {
+            console.log(error, "error");
             next(error);
       }
 };

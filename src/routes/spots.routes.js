@@ -8,6 +8,7 @@ import {
       assignSpot,
       completeSpot,
       rateSpot,
+      getRandomGestureVerification,
 } from "../controllers/spots.controller.js";
 import { authorize } from "../middlewares/authorize.middleware.js";
 import multer from "multer";
@@ -26,6 +27,10 @@ const upload = multer({
 });
 
 const spotsRouter = Router();
+
+// Gesture verification route
+spotsRouter.post("/gesture-verification", authorize(), getRandomGestureVerification);
+spotsRouter.post("/random-gesture", authorize(), getRandomGestureVerification);
 
 // Public / Authenticated spot listing & detail retrieval
 spotsRouter.get("/", getMarkedSpots);

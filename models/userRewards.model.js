@@ -22,7 +22,7 @@ const userRewardsSchema = new mongoose.Schema({
                   {
                         name: {
                               type: String,
-                              enum: ["The Beginner", "The Spy", "The Explorer", "The Hero", "The Icon", "The King", "The Legend"],
+                              enum: ["The Beginner", "The Spy", "The Explorer", "Eye of the eagle", "The Hero", "The Icon", "The King", "The Legend"],
                               required: true
                         },
                         dateEarned: {

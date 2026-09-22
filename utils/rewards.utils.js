@@ -204,52 +204,133 @@ const leaderboardRankCalculated = async (user) => {
 const streaksCalculated = async (user) => {
       const userId = user?.user_id || user?._id || user?.id || user;
       try {
-            const userStatus = await UserStatus.findOne({ user: userId });
-            let userRewards = await UserRewards.findOne({ user: userId });
-            if (!userRewards) {
-                  userRewards = new UserRewards({ user: userId });
+            const [userStatus, userRewards, dbMarkedSpots, dbCompletedSpots] = await Promise.all([
+                  UserStatus.findOne({ $or: [{ user: userId }, { userId }] }),
+                  UserRewards.findOne({ $or: [{ user: userId }, { userId }] }),
+                  MarkedSpot.find({ markedBy: userId }).select("markedAt createdAt"),
+                  MarkedSpot.find({ "isCompletedBy.completedBy": userId }).select("isCompletedBy createdAt"),
+            ]);
+
+            let targetRewards = userRewards;
+            if (!targetRewards) {
+                  targetRewards = new UserRewards({ user: userId });
             }
+
+            const activeDatesSet = new Set();
+
+            // 1. Process activeDays from userRewards
+            if (Array.isArray(targetRewards.activeDays)) {
+                  targetRewards.activeDays.forEach((d) => {
+                        if (d) {
+                              try {
+                                    activeDatesSet.add(new Date(d).toISOString().split("T")[0]);
+                              } catch (e) {}
+                        }
+                  });
+            }
+
+            // 2. Process MarkedSpot records
+            (dbMarkedSpots || []).forEach((s) => {
+                  const dt = s.markedAt || s.createdAt;
+                  if (dt) activeDatesSet.add(new Date(dt).toISOString().split("T")[0]);
+            });
+
+            // 3. Process CompletedSpot records
+            (dbCompletedSpots || []).forEach((s) => {
+                  if (Array.isArray(s.isCompletedBy)) {
+                        s.isCompletedBy.forEach((c) => {
+                              if (String(c.completedBy) === String(userId) && c.completedAt) {
+                                    activeDatesSet.add(new Date(c.completedAt).toISOString().split("T")[0]);
+                              }
+                        });
+                  }
+            });
+
+            // 4. Process UserStatus activity
             if (userStatus) {
-                  const now = new Date();
-                  const todayStr = now.toISOString().split('T')[0];
-
-                  const lastActive = userStatus.lastActiveAt || userRewards.lastStreakDate;
-                  const lastActiveStr = lastActive ? new Date(lastActive).toISOString().split('T')[0] : null;
-
-                  if (!Array.isArray(userRewards.activeDays)) {
-                        userRewards.activeDays = [];
+                  if (userStatus.lastActiveAt) {
+                        activeDatesSet.add(new Date(userStatus.lastActiveAt).toISOString().split("T")[0]);
                   }
+                  (userStatus.MarkedSpots || []).forEach((s) => {
+                        if (s?.markedAt) activeDatesSet.add(new Date(s.markedAt).toISOString().split("T")[0]);
+                  });
+                  (userStatus.AssignedSpots || []).forEach((s) => {
+                        if (s?.assignedAt) activeDatesSet.add(new Date(s.assignedAt).toISOString().split("T")[0]);
+                  });
+                  (userStatus.CompletedSpots || []).forEach((s) => {
+                        if (s?.completedAt) activeDatesSet.add(new Date(s.completedAt).toISOString().split("T")[0]);
+                  });
+            }
 
-                  const existingDateStrs = userRewards.activeDays.map((d) => d ? new Date(d).toISOString().split('T')[0] : '');
-                  if (!existingDateStrs.includes(todayStr)) {
-                        userRewards.activeDays.push(now);
-                  }
+            const now = new Date();
+            const todayStr = now.toISOString().split("T")[0];
+            activeDatesSet.add(todayStr); // Register today's action
 
-                  if (!lastActiveStr) {
-                        userRewards.currentStreak = 1;
-                  } else if (lastActiveStr === todayStr) {
-                        userRewards.currentStreak = Math.max(userRewards.currentStreak || 1, 1);
+            // Convert set to array of sorted date strings (ascending)
+            const sortedDates = Array.from(activeDatesSet).filter(Boolean).sort();
+
+            // Calculate current streak backward from today
+            let currentStreak = 0;
+            let checkDate = new Date(now);
+
+            while (true) {
+                  const checkStr = checkDate.toISOString().split("T")[0];
+                  if (activeDatesSet.has(checkStr)) {
+                        currentStreak += 1;
+                        checkDate.setDate(checkDate.getDate() - 1);
                   } else {
-                        const yesterday = new Date(now);
-                        yesterday.setDate(now.getDate() - 1);
-                        const yesterdayStr = yesterday.toISOString().split('T')[0];
+                        break;
+                  }
+            }
 
-                        if (lastActiveStr === yesterdayStr) {
-                              userRewards.currentStreak = (userRewards.currentStreak || 0) + 1;
-                        } else {
-                              userRewards.currentStreak = 1;
+            // Calculate longest streak across history
+            let longestStreak = 0;
+            let tempStreak = 0;
+            let prevTime = null;
+
+            for (const dStr of sortedDates) {
+                  const currTime = new Date(dStr).getTime();
+                  if (prevTime === null) {
+                        tempStreak = 1;
+                  } else {
+                        const diffDays = Math.round((currTime - prevTime) / (1000 * 3600 * 24));
+                        if (diffDays === 1) {
+                              tempStreak += 1;
+                        } else if (diffDays > 1) {
+                              tempStreak = 1;
                         }
                   }
+                  prevTime = currTime;
+                  if (tempStreak > longestStreak) {
+                        longestStreak = tempStreak;
+                  }
+            }
 
-                  userRewards.longestStreak = Math.max(userRewards.longestStreak || 0, userRewards.currentStreak);
-                  userRewards.lastStreakDate = now;
-                  userStatus.streaks = userRewards.currentStreak;
+            longestStreak = Math.max(longestStreak, targetRewards.longestStreak || 0, currentStreak);
+
+            // Update userRewards and userStatus
+            targetRewards.currentStreak = currentStreak;
+            targetRewards.longestStreak = longestStreak;
+            targetRewards.lastStreakDate = now;
+
+            // Re-sync activeDays array as array of Date objects
+            targetRewards.activeDays = sortedDates.map((dStr) => new Date(`${dStr}T12:00:00.000Z`));
+
+            await targetRewards.save();
+
+            if (userStatus) {
+                  userStatus.streaks = currentStreak;
                   userStatus.lastActiveAt = now;
-
-                  await userRewards.save();
                   await userStatus.save();
             }
-            return { success: true, message: "Streaks calculated successfully" };
+
+            return {
+                  success: true,
+                  message: "Streaks calculated successfully",
+                  currentStreak,
+                  longestStreak,
+                  totalActiveDays: sortedDates.length,
+            };
       } catch (error) {
             console.error("Error in streaksCalculated:", error);
             return { success: false, message: "Error calculating streaks" };

@@ -19,6 +19,14 @@ const markedSpotsSchema = new mongoose.Schema(
                   type: String,
                   required: true
             },
+            category: {
+                  type: String,
+                  default: 'Mixed Waste'
+            },
+            wasteCategory: {
+                  type: String,
+                  default: 'Mixed Waste'
+            },
             image: {
                   type: String,
                   required: true
