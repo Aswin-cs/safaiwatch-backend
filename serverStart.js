@@ -6,7 +6,7 @@ import http from 'http';
 import { initialize } from './config/socketIoConfig.js';
 const Port = PORT || 5000;
 app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
+// app.use(express.urlencoded({ extended: false }));
 const httpServer = http.createServer(app);
 const io = await initialize(httpServer);
 app.set('io', io);

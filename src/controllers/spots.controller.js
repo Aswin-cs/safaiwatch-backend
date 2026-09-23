@@ -16,7 +16,7 @@ import {
 } from "../../utils/rewards.utils.js";
 import { getIo } from "../../config/socketIoConfig.js";
 import { aiPhotoVerification, getImageFRomCLoudinary } from "../../utils/aiPhotoVerification.utils.js";
-
+import crypto from "crypto";
 
 /**
  * Helper to upload image file or base64 data to Cloudinary if provided
@@ -88,12 +88,14 @@ export const markSpot = async (req, res, next) => {
             if (!userId) {
                   return next(errorHandler(401, "Unauthorized"));
             }
-
+            await preImageOrCodeVerification(req);
             const { address, description, critical, critcal, type, category, wasteCategory, wasteType } = req.body;
 
             if (!address || !description) {
                   return next(errorHandler(400, "Address and description are required fields."));
             }
+
+
 
             const rawCoords = req.body.coordinates || req.body.geolocation?.coordinates;
             const coordinates = parseCoordinates(rawCoords);
@@ -894,8 +896,6 @@ export const getRandomGestureVerification = async (req, res, next) => {
                   return next(errorHandler(400, "Coordinator cannot perform this action"));
             }
 
-            // Remove any old gesture verifications for this user
-            await OneTime.deleteMany({ user: userId });
 
             // get the random gesture
             const imageUrl = await getImageFRomCLoudinary();
@@ -903,11 +903,15 @@ export const getRandomGestureVerification = async (req, res, next) => {
             if (!imageUrl) {
                   return next(errorHandler(404, "Image not found"));
             }
+
+            // Remove any old gesture verifications for this user right before saving
+            await OneTime.deleteMany({ user: userId });
+
             const randomVerification = new OneTime({
                   user: userId,
                   guestureImage: imageUrl,
                   coordinates: coordinates,
-                  expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+                  expiresAt: new Date(Date.now() + 5 * 60 * 1000),
             });
             await randomVerification.save();
 
@@ -920,3 +924,105 @@ export const getRandomGestureVerification = async (req, res, next) => {
             next(error);
       }
 };
+
+export const getRandomCodeVerification = async (req, res, next) => {
+      try {
+            const userId = req.body?.userId || req.user?._id?.toString() || req.user?.id;
+            const { coordinates } = req.body;
+            if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+                  return next(errorHandler(400, "Invalid user ID"));
+            }
+            if (!coordinates || !Array.isArray(coordinates) || coordinates.length !== 2) {
+                  return next(errorHandler(400, "Invalid coordinates"));
+            }
+            const isValidUser = await User.findById(userId);
+            if (!isValidUser) {
+                  return next(errorHandler(404, "User not found"));
+            }
+            if (isValidUser.role == "Coordinator") {
+                  return next(errorHandler(400, "Coordinator cannot perform this action"));
+            }
+
+            // get the random code
+            const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+            const randomCode = Array.from(crypto.randomBytes(4), (b) => chars[b % chars.length]).join("");
+
+            // Remove any old code verifications for this user right before saving
+            await OneTime.deleteMany({ user: userId });
+
+            const randomVerification = new OneTime({
+                  user: userId,
+                  code: randomCode,
+                  coordinates: coordinates,
+                  expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+            });
+            await randomVerification.save();
+
+            return responseHandler(res, 200, "Random code verification sent successfully", {
+                  verificationId: randomVerification._id,
+                  code: randomCode,
+            });
+      } catch (error) {
+            console.log(error, "error");
+            next(error);
+      }
+}
+
+export const preImageOrCodeVerification = async (req) => {
+      const { verificationId } = req.body;
+      const rawCoords = req.body.coordinates || req.body.geolocation?.coordinates;
+      const coordinates = parseCoordinates(rawCoords);
+
+      if (!verificationId || !mongoose.Types.ObjectId.isValid(verificationId)) {
+            throw errorHandler(400, "Valid verification ID is required");
+      }
+
+      if (!coordinates || coordinates.length !== 2 || coordinates.some(isNaN)) {
+            throw errorHandler(400, "Invalid coordinates provided");
+      }
+
+      // Check validity of verificationId
+      const oneTime = await OneTime.findById(verificationId);
+      if (!oneTime) {
+            throw errorHandler(404, "Invalid or expired verification ID");
+      }
+
+      // Check if verification has expired
+      if (new Date(oneTime.expiresAt).getTime() < Date.now()) {
+            await OneTime.findByIdAndDelete(verificationId);
+            throw errorHandler(400, "Verification code/gesture has expired");
+      }
+
+      const userId = req.user?._id?.toString() || req.user?.id || "";
+      if (!userId) {
+            throw errorHandler(401, "Unauthorized");
+      }
+
+      // Check user ownership
+      if (oneTime.user && oneTime.user.toString() !== userId) {
+            throw errorHandler(403, "Verification does not belong to this user");
+      }
+
+      const isValidUser = await User.findById(userId);
+      if (!isValidUser) {
+            throw errorHandler(404, "User not found");
+      }
+
+      if (isValidUser.role === "Coordinator") {
+            throw errorHandler(400, "Coordinator cannot perform this action");
+      }
+
+      // Compare coordinates (with minor float tolerance)
+      const lngDiff = Math.abs(Number(oneTime.coordinates[0]) - Number(coordinates[0]));
+      const latDiff = Math.abs(Number(oneTime.coordinates[1]) - Number(coordinates[1]));
+      if (lngDiff > 0.001 || latDiff > 0.001) {
+            throw errorHandler(400, "Verification location coordinates do not match");
+      }
+      const data = req.body.type == "gesture" ? oneTime.guestureImage : oneTime.code;
+
+      // Remove consumed verification
+      await OneTime.deleteMany({ user: userId });
+
+      return data;
+};
+
