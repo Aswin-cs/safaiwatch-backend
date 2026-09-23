@@ -201,6 +201,16 @@ const leaderboardRankCalculated = async (user) => {
       }
 };
 
+const getYYYYMMDD = (d) => {
+      if (!d) return "";
+      const date = new Date(d);
+      if (isNaN(date.getTime())) return "";
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const day = String(date.getDate()).padStart(2, "0");
+      return `${year}-${month}-${day}`;
+};
+
 const streaksCalculated = async (user) => {
       const userId = user?.user_id || user?._id || user?.id || user;
       try {
@@ -221,18 +231,16 @@ const streaksCalculated = async (user) => {
             // 1. Process activeDays from userRewards
             if (Array.isArray(targetRewards.activeDays)) {
                   targetRewards.activeDays.forEach((d) => {
-                        if (d) {
-                              try {
-                                    activeDatesSet.add(new Date(d).toISOString().split("T")[0]);
-                              } catch (e) {}
-                        }
+                        const str = getYYYYMMDD(d);
+                        if (str) activeDatesSet.add(str);
                   });
             }
 
             // 2. Process MarkedSpot records
             (dbMarkedSpots || []).forEach((s) => {
                   const dt = s.markedAt || s.createdAt;
-                  if (dt) activeDatesSet.add(new Date(dt).toISOString().split("T")[0]);
+                  const str = getYYYYMMDD(dt);
+                  if (str) activeDatesSet.add(str);
             });
 
             // 3. Process CompletedSpot records
@@ -240,7 +248,8 @@ const streaksCalculated = async (user) => {
                   if (Array.isArray(s.isCompletedBy)) {
                         s.isCompletedBy.forEach((c) => {
                               if (String(c.completedBy) === String(userId) && c.completedAt) {
-                                    activeDatesSet.add(new Date(c.completedAt).toISOString().split("T")[0]);
+                                    const str = getYYYYMMDD(c.completedAt);
+                                    if (str) activeDatesSet.add(str);
                               }
                         });
                   }
@@ -249,21 +258,25 @@ const streaksCalculated = async (user) => {
             // 4. Process UserStatus activity
             if (userStatus) {
                   if (userStatus.lastActiveAt) {
-                        activeDatesSet.add(new Date(userStatus.lastActiveAt).toISOString().split("T")[0]);
+                        const str = getYYYYMMDD(userStatus.lastActiveAt);
+                        if (str) activeDatesSet.add(str);
                   }
                   (userStatus.MarkedSpots || []).forEach((s) => {
-                        if (s?.markedAt) activeDatesSet.add(new Date(s.markedAt).toISOString().split("T")[0]);
+                        const str = getYYYYMMDD(s?.markedAt);
+                        if (str) activeDatesSet.add(str);
                   });
                   (userStatus.AssignedSpots || []).forEach((s) => {
-                        if (s?.assignedAt) activeDatesSet.add(new Date(s.assignedAt).toISOString().split("T")[0]);
+                        const str = getYYYYMMDD(s?.assignedAt);
+                        if (str) activeDatesSet.add(str);
                   });
                   (userStatus.CompletedSpots || []).forEach((s) => {
-                        if (s?.completedAt) activeDatesSet.add(new Date(s.completedAt).toISOString().split("T")[0]);
+                        const str = getYYYYMMDD(s?.completedAt);
+                        if (str) activeDatesSet.add(str);
                   });
             }
 
             const now = new Date();
-            const todayStr = now.toISOString().split("T")[0];
+            const todayStr = getYYYYMMDD(now);
             activeDatesSet.add(todayStr); // Register today's action
 
             // Convert set to array of sorted date strings (ascending)
@@ -274,7 +287,7 @@ const streaksCalculated = async (user) => {
             let checkDate = new Date(now);
 
             while (true) {
-                  const checkStr = checkDate.toISOString().split("T")[0];
+                  const checkStr = getYYYYMMDD(checkDate);
                   if (activeDatesSet.has(checkStr)) {
                         currentStreak += 1;
                         checkDate.setDate(checkDate.getDate() - 1);

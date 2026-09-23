@@ -17,6 +17,23 @@ import {
 import { getIo } from "../../config/socketIoConfig.js";
 import { aiPhotoVerification, getImageFRomCLoudinary } from "../../utils/aiPhotoVerification.utils.js";
 import crypto from "crypto";
+import jwt from "jsonwebtoken";
+import { JWT_SECRET } from "../../config/envConfig.js";
+
+/**
+ * Helper to get user ID from req.user or JWT token if available
+ */
+const getRequesterUserId = (req) => {
+      if (req.user?._id) return req.user._id.toString();
+      try {
+            const token = req.cookies?.token || (req.headers?.authorization?.startsWith("Bearer ") ? req.headers.authorization.split(" ")[1] : null);
+            if (token) {
+                  const decoded = jwt.verify(token, JWT_SECRET);
+                  return decoded?.userId?.toString() || decoded?.id?.toString() || null;
+            }
+      } catch (e) { }
+      return null;
+};
 
 /**
  * Helper to upload image file or base64 data to Cloudinary if provided
@@ -80,12 +97,18 @@ const aiVerification = async (req, verificationData, savedSpotId) => {
       if (!fileInput) {
             fileInput = req.body?.image || "";
       }
+      const userId = req.user?._id;
       (async () => {
             try {
                   const isvalid = await aiPhotoVerification(fileInput, req.file?.mimetype || "image/jpeg", verificationData);
                   console.log(isvalid, "AI Audit Verification Result");
+                  const isVerified = Boolean(!isvalid?.isAiOrEdited && !isvalid?.isFraudulent);
+
                   if (savedSpotId && isvalid) {
                         await MarkedSpot.findByIdAndUpdate(savedSpotId, {
+                              isVerified: isVerified,
+                              isCompletedVerify: "completed",
+                              isCompletedVerifyAt: new Date(),
                               isAiVerified: {
                                     isAiOrEdited: Boolean(isvalid?.isAiOrEdited),
                                     forensicConfidence: Number(isvalid?.forensicConfidence || 0),
@@ -96,10 +119,59 @@ const aiVerification = async (req, verificationData, savedSpotId) => {
                                     isFraudulent: Boolean(isvalid?.isFraudulent),
                                     fraudReason: isvalid?.fraudReason || "",
                                     auditResult: isvalid,
-                                    verifiedBy: req.user?._id,
+                                    verifiedBy: userId,
                                     verifiedAt: new Date(),
                               }
                         });
+                        (async () => {
+                              try {
+                                    await rewardsCalculating(userId, { markedSpotId: savedSpot._id }, "marked");
+                                    await Promise.all([
+                                          streaksCalculated({ user_id: userId }),
+                                          badgesCalculating({ user_id: userId }),
+                                    ]);
+                                    await leaderboardRankCalculated({ user_id: userId });
+                              } catch (rewardErr) {
+                                    console.error("Background reward calculation error in markSpot:", rewardErr);
+                              }
+                        })();
+
+                        if (isVerified) {
+                              try {
+                                    const populatedSpot = await MarkedSpot.findById(savedSpotId)
+                                          .populate("markedBy", "_id username avatar role email");
+
+                                    getIo().emit("spot:created", {
+                                          spot: populatedSpot,
+                                    });
+                              } catch (socketErr) {
+                                    console.error("Socket emit error in aiVerification:", socketErr);
+                              }
+                        }
+
+                        // Emit real-time notification event targeted specifically for the user who marked the spot
+                        const toastPayload = {
+                              spotId: savedSpotId,
+                              userId: userId ? userId.toString() : "",
+                              isVerified: isVerified,
+                              isCompletedVerify: "completed",
+                              isAiOrEdited: Boolean(isvalid?.isAiOrEdited),
+                              isFraudulent: Boolean(isvalid?.isFraudulent),
+                              fraudReason: isvalid?.fraudReason || "",
+                              forensicDetails: isvalid?.forensicDetails || "",
+                              message: isVerified
+                                    ? "AI Audit Complete: Your reported civic spot has been verified authentic! ✓"
+                                    : `AI Audit Alert: Your spot report was flagged (${isvalid?.fraudReason || "verification failed"}).`
+                        };
+
+                        try {
+                              if (userId) {
+                                    getIo().to(`user:${userId}`).to(String(userId)).emit("spot:ai-verified", toastPayload);
+                              }
+                              getIo().emit("spot:ai-verified", toastPayload);
+                        } catch (socketErr) {
+                              console.error("Socket emit error for spot:ai-verified:", socketErr);
+                        }
                   }
             }
             catch (error) {
@@ -197,26 +269,7 @@ export const markSpot = async (req, res, next) => {
                   .populate("markedBy", "_id username avatar role email");
 
             // Calculate rewards, badges, streaks & leaderboard rank in parallel background task (non-blocking)
-            (async () => {
-                  try {
-                        await rewardsCalculating(userId, { markedSpotId: savedSpot._id }, "marked");
-                        await Promise.all([
-                              streaksCalculated({ user_id: userId }),
-                              badgesCalculating({ user_id: userId }),
-                        ]);
-                        await leaderboardRankCalculated({ user_id: userId });
-                  } catch (rewardErr) {
-                        console.error("Background reward calculation error in markSpot:", rewardErr);
-                  }
-            })();
 
-            try {
-                  getIo().emit("spot:created", {
-                        spot: populatedSpot || savedSpot,
-                  });
-            } catch (socketErr) {
-                  console.error("Socket emit error in markSpot:", socketErr);
-            }
 
             return responseHandler(res, 201, "Spot marked successfully", {
                   spot: populatedSpot || savedSpot,
@@ -255,6 +308,7 @@ export const getMarkedSpots = async (req, res, next) => {
             } = req.query;
 
             const query = {};
+            const andConditions = [];
 
             if (status === "completed") {
                   query.isCompleted = true;
@@ -272,10 +326,12 @@ export const getMarkedSpots = async (req, res, next) => {
             }
 
             if (search) {
-                  query.$or = [
-                        { address: { $regex: search, $options: "i" } },
-                        { description: { $regex: search, $options: "i" } },
-                  ];
+                  andConditions.push({
+                        $or: [
+                              { address: { $regex: search, $options: "i" } },
+                              { description: { $regex: search, $options: "i" } },
+                        ],
+                  });
             }
 
             if (lat && lng) {
@@ -296,6 +352,32 @@ export const getMarkedSpots = async (req, res, next) => {
                   }
             }
 
+            // Verification & Ownership visibility restriction:
+            // Spots marked by other users MUST have isVerified: true to be visible in frontend.
+            // Spots marked by the requesting user themselves are visible even if unverified/pending verification.
+            const requesterId = getRequesterUserId(req);
+
+            if (markedBy) {
+                  if (!requesterId || markedBy.toString() !== requesterId.toString()) {
+                        query.isVerified = true;
+                  }
+            } else {
+                  if (requesterId) {
+                        andConditions.push({
+                              $or: [
+                                    { markedBy: requesterId },
+                                    { isVerified: true },
+                              ],
+                        });
+                  } else {
+                        query.isVerified = true;
+                  }
+            }
+
+            if (andConditions.length > 0) {
+                  query.$and = andConditions;
+            }
+
             const pageNum = Math.max(1, parseInt(page, 10));
             const limitNum = Math.max(1, parseInt(limit, 10));
             const skip = (pageNum - 1) * limitNum;
@@ -311,8 +393,22 @@ export const getMarkedSpots = async (req, res, next) => {
                   MarkedSpot.countDocuments(query),
             ]);
 
+            const sanitizedSpots = spots.map((spotDoc) => {
+                  const spotObj = spotDoc.toObject ? spotDoc.toObject() : { ...spotDoc };
+                  const markedById = spotObj.markedBy?._id ? spotObj.markedBy._id.toString() : spotObj.markedBy?.toString();
+                  const isOwner = Boolean(requesterId && markedById && requesterId === markedById);
+
+                  if (!isOwner) {
+                        delete spotObj.isAiVerified;
+                        delete spotObj.isVerified;
+                        delete spotObj.isCompletedVerify;
+                        delete spotObj.isCompletedVerifyAt;
+                  }
+                  return spotObj;
+            });
+
             return responseHandler(res, 200, "Spots fetched successfully", {
-                  spots,
+                  spots: sanitizedSpots,
                   totalCount,
                   page: pageNum,
                   totalPages: Math.ceil(totalCount / limitNum),
@@ -345,8 +441,24 @@ export const getMarkedSpot = async (req, res, next) => {
                   return next(errorHandler(404, "Marked spot not found"));
             }
 
+            const requesterId = getRequesterUserId(req);
+            const spotObj = spot.toObject ? spot.toObject() : { ...spot };
+            const markedById = spotObj.markedBy?._id ? spotObj.markedBy._id.toString() : spotObj.markedBy?.toString();
+            const isOwner = Boolean(requesterId && markedById && requesterId === markedById);
+
+            if (!isOwner && !spotObj.isVerified) {
+                  return next(errorHandler(404, "Marked spot not found"));
+            }
+
+            if (!isOwner) {
+                  delete spotObj.isAiVerified;
+                  delete spotObj.isVerified;
+                  delete spotObj.isCompletedVerify;
+                  delete spotObj.isCompletedVerifyAt;
+            }
+
             return responseHandler(res, 200, "Spot retrieved successfully", {
-                  spot,
+                  spot: spotObj,
             });
       } catch (error) {
             next(error);

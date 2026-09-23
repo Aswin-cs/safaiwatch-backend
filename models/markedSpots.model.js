@@ -142,6 +142,19 @@ const markedSpotsSchema = new mongoose.Schema(
                               default: Date.now
                         }
                   },
+            },
+            isVerified: {
+                  type: Boolean,
+                  default: false
+            },
+            isCompletedVerify: {
+                  type: String,
+                  enum: ["pending", "completed", "uncompleted"],
+                  default: "pending"
+            },
+            isCompletedVerifyAt: {
+                  type: Date,
+                  default: Date.now
             }
       }
 )

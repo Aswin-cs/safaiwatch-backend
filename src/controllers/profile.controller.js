@@ -10,6 +10,16 @@ import { JWT_SECRET } from "../../config/envConfig.js";
 import jwt from "jsonwebtoken";
 import { uploadToCloudinary, deleteFromCloudinary } from "../../utils/Cloudinaryimage.utils.js";
 
+const getYYYYMMDD = (d) => {
+      if (!d) return "";
+      const date = new Date(d);
+      if (isNaN(date.getTime())) return "";
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const day = String(date.getDate()).padStart(2, "0");
+      return `${year}-${month}-${day}`;
+};
+
 const getWeekDays = (userActiveDays = [], userStatus = null) => {
       const now = new Date();
       const currentDayOfWeek = now.getDay();
@@ -24,10 +34,8 @@ const getWeekDays = (userActiveDays = [], userStatus = null) => {
       if (Array.isArray(userActiveDays)) {
             userActiveDays.forEach((d) => {
                   if (d) {
-                        try {
-                              const str = new Date(d).toISOString().split("T")[0];
-                              activeDatesSet.add(str);
-                        } catch (e) { }
+                        const str = getYYYYMMDD(d);
+                        if (str) activeDatesSet.add(str);
                   }
             });
       }
@@ -35,36 +43,33 @@ const getWeekDays = (userActiveDays = [], userStatus = null) => {
       if (userStatus) {
             (userStatus.MarkedSpots || []).forEach((s) => {
                   if (s && s.markedAt) {
-                        try {
-                              activeDatesSet.add(new Date(s.markedAt).toISOString().split("T")[0]);
-                        } catch (e) { }
+                        const str = getYYYYMMDD(s.markedAt);
+                        if (str) activeDatesSet.add(str);
                   }
             });
             (userStatus.AssignedSpots || []).forEach((s) => {
                   if (s && s.assignedAt) {
-                        try {
-                              activeDatesSet.add(new Date(s.assignedAt).toISOString().split("T")[0]);
-                        } catch (e) { }
+                        const str = getYYYYMMDD(s.assignedAt);
+                        if (str) activeDatesSet.add(str);
                   }
             });
             (userStatus.CompletedSpots || []).forEach((s) => {
                   if (s && s.completedAt) {
-                        try {
-                              activeDatesSet.add(new Date(s.completedAt).toISOString().split("T")[0]);
-                        } catch (e) { }
+                        const str = getYYYYMMDD(s.completedAt);
+                        if (str) activeDatesSet.add(str);
                   }
             });
       }
 
-      const todayStr = now.toISOString().split("T")[0];
+      const todayStr = getYYYYMMDD(now);
       const dayNames = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
 
       return dayNames.map((dayName, idx) => {
             const dayDate = new Date(monday);
             dayDate.setDate(monday.getDate() + idx);
-            const dateStr = dayDate.toISOString().split("T")[0];
+            const dateStr = getYYYYMMDD(dayDate);
             const isToday = dateStr === todayStr;
-            const isPast = dayDate < new Date(todayStr);
+            const isPast = dateStr < todayStr;
             const isActive = activeDatesSet.has(dateStr);
 
             return {
@@ -191,6 +196,10 @@ export const getMyProfile = async (req, res, next) => {
                         completedAt: s.isCompleted ? (s.updatedAt || s.markedAt) : undefined,
                         critical: s.critcal || s.critical || "Medium",
                         description: s.description || s.address,
+                        isVerified: Boolean(s.isVerified),
+                        isCompletedVerify: s.isCompletedVerify || "pending",
+                        isCompletedVerifyAt: s.isCompletedVerifyAt,
+                        isAiVerified: s.isAiVerified || null,
                   };
             });
 
@@ -476,6 +485,9 @@ export const getProfileByUsername = async (req, res, next) => {
                         };
                   });
 
+            const reqUserId = req.user?._id?.toString();
+            const isOwner = Boolean(reqUserId && reqUserId === userId.toString());
+
             const markedCaseItems = allMarkedSpots.map((s, i) => {
                   const spotIdStr = s._id ? String(s._id) : `marked-${i}`;
                   return {
@@ -495,6 +507,12 @@ export const getProfileByUsername = async (req, res, next) => {
                         completedAt: s.isCompleted ? (s.updatedAt || s.markedAt) : undefined,
                         critical: s.critcal || s.critical || "Medium",
                         description: s.description || s.address,
+                        ...(isOwner && {
+                              isVerified: Boolean(s.isVerified),
+                              isCompletedVerify: s.isCompletedVerify || "pending",
+                              isCompletedVerifyAt: s.isCompletedVerifyAt,
+                              isAiVerified: s.isAiVerified || null,
+                        }),
                   };
             });
 
@@ -640,10 +658,18 @@ export const getUserHistory = async (req, res, next) => {
                   isCompleted: Boolean(s.isCompleted),
                   status: s.isCompleted ? "Completed" : "Pending",
                   date: s.markedAt || s.createdAt,
+                  isVerified: Boolean(s.isVerified),
+                  isCompletedVerify: s.isCompletedVerify || "pending",
+                  isCompletedVerifyAt: s.isCompletedVerifyAt,
+                  isAiVerified: s.isAiVerified || null,
                   details: {
                         critical: s.critcal || s.critical || "Medium",
                         description: s.description || s.address,
                         markedBy: s.markedBy?.username || s.markedBy?.name || user.username,
+                        isVerified: Boolean(s.isVerified),
+                        isCompletedVerify: s.isCompletedVerify || "pending",
+                        isCompletedVerifyAt: s.isCompletedVerifyAt,
+                        isAiVerified: s.isAiVerified || null,
                   },
             }));
 
