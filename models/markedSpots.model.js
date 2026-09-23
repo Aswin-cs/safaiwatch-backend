@@ -95,7 +95,7 @@ const markedSpotsSchema = new mongoose.Schema(
                   default: 1
             },
             isAiVerified: {
-                  type: [{
+                  type: {
                         isAiOrEdited: {
                               type: Boolean,
                               default: false
@@ -141,8 +141,7 @@ const markedSpotsSchema = new mongoose.Schema(
                               type: Date,
                               default: Date.now
                         }
-                  }],
-                  default: []
+                  },
             }
       }
 )

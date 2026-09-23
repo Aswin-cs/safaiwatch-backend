@@ -9,20 +9,19 @@ export async function getImageFRomCLoudinary() {
             prefix: 'gestures',   // folder path
             max_results: 10,
       });
-      if (result) {
-            console.log(result, "fffffffffffffffffffffffff");
-      }
+
       if (!result?.resources || result.resources.length === 0) {
             throw new Error("No gesture reference images found in Cloudinary folder '/gestures'");
       }
       const randomImage = result.resources[Math.floor(Math.random() * result.resources.length)];
       return randomImage.secure_url || randomImage.url;
 }
+
 export const SYSTEM_INSTRUCTION_WITH_FORENSICS = `
 You are the visual auditing and forensic inspection agent for SafaiWatch, a civic sanitation management platform.
 Your objective is to evaluate a submitted report image (Image 2) against a target hand gesture reference icon (Image 1) and determine if the report is authentic, verified, and free of fraud.
 
-Conduct a rigorous step-by-step audit across four distinct phases:
+Conduct a rigorous step-by-step audit across three distinct phases:
 
 ---
 
@@ -63,12 +62,41 @@ RULE: If Image 2 lacks real outdoor waste or shows a non-waste scene, set isVali
 OUTPUT DIRECTIVE:
 Provide your final verdict strictly matching the required JSON schema. Maintain deterministic, objective, and strict evaluation standards to protect SafaiWatch platform integrity.
 `;
+
+export const SYSTEM_INSTRUCTION_CODE_FORENSICS = (targetCode) => `
+You are the visual auditing and forensic inspection agent for SafaiWatch, a civic sanitation management platform.
+Your objective is to evaluate a submitted report image against a target verification code "${targetCode}" and determine if the report is authentic, verified, and free of fraud.
+
+Conduct a rigorous step-by-step audit across three distinct phases:
+
+---
+
+PHASE 1: DIGITAL FORENSICS & SYNTHETIC MEDIA DETECTION
+Analyze the image for signs of artificial generation, digital editing, or screen photo capture.
+RULE: If ANY synthetic generation or digital editing is detected, set isAiOrEdited = true, set isFraudulent = true, set fraudReason = "AI_GENERATED_OR_EDITED", and document the exact visual anomaly in forensicDetails.
+
+---
+
+PHASE 2: CODE WORD VERIFICATION
+Verify that the target code "${targetCode}" is written (on paper, cardboard, slate, or board) and physically present in the photo near the waste site.
+1. Read any visible text or code written in the foreground or on any paper/cardboard in the image.
+2. Match it case-insensitively against the target code "${targetCode}".
+RULE: If the code "${targetCode}" is missing, unreadable, or incorrect, set codeMatched = false, set isFraudulent = true, and set fraudReason = "CODE_MISMATCH".
+
+---
+
+PHASE 3: MUNICIPAL WASTE SITE VERIFICATION
+Evaluate the image background to confirm a legitimate civic waste incident in a public/outdoor area.
+RULE: If the image lacks real outdoor waste or shows a non-waste scene, set isValidWasteReport = false, set isFraudulent = true, and set fraudReason = "NO_WASTE_DETECTED".
+
+
+OUTPUT DIRECTIVE:
+Provide your final verdict strictly matching the required JSON schema.
+`;
+
 export const SAFEIWATCH_AUDIT_SCHEMA = {
       type: Type.OBJECT,
       properties: {
-            // ==========================================
-            // PHASE 1: DIGITAL FORENSICS & EDIT DETECTION
-            // ==========================================
             isAiOrEdited: {
                   type: Type.BOOLEAN,
                   description: "True if synthetic rendering, deepfake artifacts, digital compositing, or photo-editing is detected."
@@ -86,10 +114,6 @@ export const SAFEIWATCH_AUDIT_SCHEMA = {
                   type: Type.STRING,
                   description: "Detailed description of observed forensic anomalies (e.g., fused digits, lighting inconsistencies, moiré lines, cut-and-paste halos)."
             },
-
-            // ==========================================
-            // PHASE 2: GESTURE VERIFICATION
-            // ==========================================
             gestureMatched: {
                   type: Type.BOOLEAN,
                   description: "True strictly if the foreground hand gesture in Image 2 matches the target gesture guide in Image 1."
@@ -98,25 +122,17 @@ export const SAFEIWATCH_AUDIT_SCHEMA = {
                   type: Type.STRING,
                   description: "Name or description of the hand gesture observed in Image 2 (e.g. PEACE, THUMBS_UP, UNKNOWN)."
             },
-
-            // ==========================================
-            // PHASE 3: MUNICIPAL WASTE SITE VERIFICATION
-            // ==========================================
             isValidWasteReport: {
                   type: Type.BOOLEAN,
                   description: "True ONLY if real outdoor municipal waste is present in a public setting."
             },
-
-            // ==========================================
-            // OVERALL AUDIT VERDICT & REASONING
-            // ==========================================
             isFraudulent: {
                   type: Type.BOOLEAN,
                   description: "True if isAiOrEdited is true, gesture mismatch occurs, or no outdoor waste is present."
             },
             fraudReason: {
                   type: Type.STRING,
-                  enum: ["AI_GENERATED_OR_EDITED", "GESTURE_MISMATCH", "SCREENSHOT", "NO_WASTE_DETECTED", "NONE"],
+                  enum: ["AI_GENERATED_OR_EDITED", "GESTURE_MISMATCH", "CODE_MISMATCH", "SCREENSHOT", "NO_WASTE_DETECTED", "NONE"],
                   description: "Primary failure code if flagged as fraudulent."
             },
             summary: {
@@ -137,7 +153,68 @@ export const SAFEIWATCH_AUDIT_SCHEMA = {
             "summary"
       ]
 };
-export const aiPhotoVerification = async (input, mimeTypeParam) => {
+
+export const SAFEIWATCH_CODE_AUDIT_SCHEMA = {
+      type: Type.OBJECT,
+      properties: {
+            isAiOrEdited: {
+                  type: Type.BOOLEAN,
+                  description: "True if synthetic rendering, deepfake artifacts, digital compositing, or photo-editing is detected."
+            },
+            forensicConfidence: {
+                  type: Type.NUMBER,
+                  description: "Confidence score between 0.00 and 1.00 for the forensic analysis authenticity rating."
+            },
+            detectedManipulationType: {
+                  type: Type.STRING,
+                  enum: ["AI_GENERATED", "DIGITAL_COMPOSITE_EDIT", "SCREENSHOT", "AUTHENTIC_PHOTO"],
+                  description: "Primary forensic classification of the uploaded image."
+            },
+            forensicDetails: {
+                  type: Type.STRING,
+                  description: "Detailed description of observed forensic anomalies (e.g., distorted text, lighting inconsistencies, moiré lines)."
+            },
+            codeMatched: {
+                  type: Type.BOOLEAN,
+                  description: "True if the target code is clearly written and detected in the image."
+            },
+            detectedCodeText: {
+                  type: Type.STRING,
+                  description: "The code text observed in the image."
+            },
+            isValidWasteReport: {
+                  type: Type.BOOLEAN,
+                  description: "True ONLY if real outdoor municipal waste is present in a public setting."
+            },
+            isFraudulent: {
+                  type: Type.BOOLEAN,
+                  description: "True if isAiOrEdited is true, code mismatch occurs, or no outdoor waste is present."
+            },
+            fraudReason: {
+                  type: Type.STRING,
+                  enum: ["AI_GENERATED_OR_EDITED", "GESTURE_MISMATCH", "CODE_MISMATCH", "SCREENSHOT", "NO_WASTE_DETECTED", "NONE"],
+                  description: "Primary failure code if flagged as fraudulent."
+            },
+            summary: {
+                  type: Type.STRING,
+                  description: "Concise 1-2 sentence description summarizing the visual audit outcome."
+            }
+      },
+      required: [
+            "isAiOrEdited",
+            "forensicConfidence",
+            "detectedManipulationType",
+            "forensicDetails",
+            "codeMatched",
+            "detectedCodeText",
+            "isValidWasteReport",
+            "isFraudulent",
+            "fraudReason",
+            "summary"
+      ]
+};
+
+export const aiPhotoVerification = async (input, mimeTypeParam, verificationData) => {
       let fileInput;
       let mimeType;
 
@@ -149,29 +226,70 @@ export const aiPhotoVerification = async (input, mimeTypeParam) => {
             mimeType = mimeTypeParam;
       }
 
-      try {
-            const remoteImageUrl = await getImageFRomCLoudinary();
-            const randomRemoteImage = await urlToGenerativePart(remoteImageUrl);
-            const filePart = await urlToGenerativePart(fileInput, mimeType);
-            const response = await generateGeminiContent({
-                  contents: [filePart, randomRemoteImage],
-                  config: {
-                        systemInstruction: SYSTEM_INSTRUCTION_WITH_FORENSICS,
-                        responseMimeType: "application/json",
-                        responseSchema: SAFEIWATCH_AUDIT_SCHEMA,
-                        temperature: 0.1,
-                  }
-            });
-            let auditResult = response;
-            if (typeof auditResult === "string") {
-                  try {
-                        auditResult = JSON.parse(auditResult);
-                  } catch (e) {
-                        console.log("Error in aiPhotoVerification:", e);
-                        // fallback to raw response if parsing fails
-                  }
+      // Extract verification type ("code" or "gesture") and payload data
+      let vType = "gesture";
+      let vData = null;
+
+      if (typeof verificationData === "string") {
+            if (verificationData === "code" || verificationData === "gesture") {
+                  vType = verificationData;
+            } else {
+                  vData = verificationData;
             }
-            return auditResult;
+      } else if (typeof verificationData === "object" && verificationData !== null) {
+            vType = (verificationData.type || "gesture").toLowerCase();
+            vData = verificationData.data || verificationData.code || verificationData.guestureImage || verificationData.gestureImage;
+      }
+
+      try {
+            const filePart = await urlToGenerativePart(fileInput, mimeType);
+
+            if (vType === "code") {
+                  const targetCode = String(vData || "").trim();
+                  const response = await generateGeminiContent({
+                        contents: [filePart],
+                        config: {
+                              systemInstruction: SYSTEM_INSTRUCTION_CODE_FORENSICS(targetCode),
+                              responseMimeType: "application/json",
+                              responseSchema: SAFEIWATCH_CODE_AUDIT_SCHEMA,
+                              temperature: 0.1,
+                        }
+                  });
+
+                  let auditResult = response;
+                  if (typeof auditResult === "string") {
+                        try {
+                              auditResult = JSON.parse(auditResult);
+                        } catch (e) {
+                              console.log("Error parsing aiPhotoVerification code audit result:", e);
+                        }
+                  }
+                  return auditResult;
+            } else {
+                  // Default: Gesture verification
+                  const remoteImageUrl = (typeof vData === "string" && vData.startsWith("http")) ? vData : await getImageFRomCLoudinary();
+                  const randomRemoteImage = await urlToGenerativePart(remoteImageUrl);
+
+                  const response = await generateGeminiContent({
+                        contents: [filePart, randomRemoteImage],
+                        config: {
+                              systemInstruction: SYSTEM_INSTRUCTION_WITH_FORENSICS,
+                              responseMimeType: "application/json",
+                              responseSchema: SAFEIWATCH_AUDIT_SCHEMA,
+                              temperature: 0.1,
+                        }
+                  });
+
+                  let auditResult = response;
+                  if (typeof auditResult === "string") {
+                        try {
+                              auditResult = JSON.parse(auditResult);
+                        } catch (e) {
+                              console.log("Error parsing aiPhotoVerification gesture audit result:", e);
+                        }
+                  }
+                  return auditResult;
+            }
       } catch (error) {
             console.error("Error in aiPhotoVerification:", error);
             throw error;

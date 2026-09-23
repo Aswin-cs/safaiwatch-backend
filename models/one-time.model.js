@@ -7,6 +7,9 @@ const oneTimeSchema = new mongoose.Schema({
       imageId: {
             type: String,
       },
+      code: {
+            type: String,
+      },
       coordinates: {
             type: [Number],
             required: true,

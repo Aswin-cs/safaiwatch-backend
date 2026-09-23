@@ -21,7 +21,7 @@ import crypto from "crypto";
 /**
  * Helper to upload image file or base64 data to Cloudinary if provided
  */
-const handleImageUpload = async (req, defaultFolder = "SafaiWatch_spots") => {
+const handleImageUpload = async (req, defaultFolder = "SafaiWatch_spots", verificationData = null) => {
       let image = req.body?.image || "";
 
       if (req.file) {
@@ -30,15 +30,6 @@ const handleImageUpload = async (req, defaultFolder = "SafaiWatch_spots") => {
                   const b64 = Buffer.from(req.file.buffer).toString("base64");
                   fileInput = `data:${req.file.mimetype};base64,${b64}`;
             }
-            (async () => {
-                  try {
-                        const isvalid = await aiPhotoVerification(fileInput, req.file.mimetype);
-                        console.log(isvalid)
-                  }
-                  catch (error) {
-                        console.log(error, "error")
-                  }
-            })()
             const uploadRes = await uploadToCloudinary(fileInput, defaultFolder);
             image = uploadRes;
       } else if (image && image.startsWith("data:image/")) {
@@ -80,15 +71,54 @@ const parseCoordinates = (coords) => {
  * Mark/Create a new civic spot
  * POST /api/v1/spots
  */
+const aiVerification = async (req, verificationData, savedSpotId) => {
+      let fileInput = req.file?.path;
+      if (!fileInput && req.file?.buffer) {
+            const b64 = Buffer.from(req.file.buffer).toString("base64");
+            fileInput = `data:${req.file.mimetype};base64,${b64}`;
+      }
+      if (!fileInput) {
+            fileInput = req.body?.image || "";
+      }
+      (async () => {
+            try {
+                  const isvalid = await aiPhotoVerification(fileInput, req.file?.mimetype || "image/jpeg", verificationData);
+                  console.log(isvalid, "AI Audit Verification Result");
+                  if (savedSpotId && isvalid) {
+                        await MarkedSpot.findByIdAndUpdate(savedSpotId, {
+                              isAiVerified: {
+                                    isAiOrEdited: Boolean(isvalid?.isAiOrEdited),
+                                    forensicConfidence: Number(isvalid?.forensicConfidence || 0),
+                                    detectedManipulationType: isvalid?.detectedManipulationType || "",
+                                    forensicDetails: isvalid?.forensicDetails || "",
+                                    gestureMatched: Boolean(isvalid?.gestureMatched ?? isvalid?.codeMatched),
+                                    isValidWasteReport: Boolean(isvalid?.isValidWasteReport),
+                                    isFraudulent: Boolean(isvalid?.isFraudulent),
+                                    fraudReason: isvalid?.fraudReason || "",
+                                    auditResult: isvalid,
+                                    verifiedBy: req.user?._id,
+                                    verifiedAt: new Date(),
+                              }
+                        });
+                  }
+            }
+            catch (error) {
+                  console.log(error, "error in aiPhotoVerification");
+            }
+      })();
+}
 export const markSpot = async (req, res, next) => {
       const session = await mongoose.startSession();
-      const imageUrl = await handleImageUpload(req);
+      let imageUrl = null;
       try {
             const userId = req.user?._id;
             if (!userId) {
                   return next(errorHandler(401, "Unauthorized"));
             }
-            await preImageOrCodeVerification(req);
+            const isVerified = await preImageOrCodeVerification(req);
+            console.log(isVerified, "isVerified,,,,,,,,,,,,,");
+            imageUrl = await handleImageUpload(req, "SafaiWatch_spots");
+
             const { address, description, critical, critcal, type, category, wasteCategory, wasteType } = req.body;
 
             if (!address || !description) {
@@ -133,7 +163,7 @@ export const markSpot = async (req, res, next) => {
             });
 
             const savedSpot = await newSpot.save({ session });
-
+            const aiData = await aiVerification(req, isVerified, savedSpot._id);
             let userStatus = await UserStatus.findOne({
                   $or: [{ user: userId }, { userId }],
             }).session(session);
@@ -904,16 +934,22 @@ export const getRandomGestureVerification = async (req, res, next) => {
                   return next(errorHandler(404, "Image not found"));
             }
 
-            // Remove any old gesture verifications for this user right before saving
+            // Remove any old gesture verifications for this user
             await OneTime.deleteMany({ user: userId });
 
-            const randomVerification = new OneTime({
-                  user: userId,
-                  guestureImage: imageUrl,
-                  coordinates: coordinates,
-                  expiresAt: new Date(Date.now() + 5 * 60 * 1000),
-            });
-            await randomVerification.save();
+            const randomVerification = await OneTime.findOneAndUpdate(
+                  { user: userId },
+                  {
+                        $set: {
+                              user: userId,
+                              guestureImage: imageUrl,
+                              code: null,
+                              coordinates: coordinates,
+                              expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+                        },
+                  },
+                  { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
+            );
 
             return responseHandler(res, 200, "Random gesture verification sent successfully", {
                   imageId: randomVerification._id,
@@ -947,16 +983,22 @@ export const getRandomCodeVerification = async (req, res, next) => {
             const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
             const randomCode = Array.from(crypto.randomBytes(4), (b) => chars[b % chars.length]).join("");
 
-            // Remove any old code verifications for this user right before saving
+            // Remove any old code verifications for this user
             await OneTime.deleteMany({ user: userId });
 
-            const randomVerification = new OneTime({
-                  user: userId,
-                  code: randomCode,
-                  coordinates: coordinates,
-                  expiresAt: new Date(Date.now() + 5 * 60 * 1000),
-            });
-            await randomVerification.save();
+            const randomVerification = await OneTime.findOneAndUpdate(
+                  { user: userId },
+                  {
+                        $set: {
+                              user: userId,
+                              code: randomCode,
+                              guestureImage: null,
+                              coordinates: coordinates,
+                              expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+                        },
+                  },
+                  { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
+            );
 
             return responseHandler(res, 200, "Random code verification sent successfully", {
                   verificationId: randomVerification._id,
@@ -969,7 +1011,12 @@ export const getRandomCodeVerification = async (req, res, next) => {
 }
 
 export const preImageOrCodeVerification = async (req) => {
-      const { verificationId } = req.body;
+      const verificationId =
+            req.body?.verificationId ||
+            req.body?.gestureVerificationId ||
+            req.body?.gestureId ||
+            req.body?.codeVerificationId ||
+            req.body?.codeId;
       const rawCoords = req.body.coordinates || req.body.geolocation?.coordinates;
       const coordinates = parseCoordinates(rawCoords);
 
@@ -1023,6 +1070,6 @@ export const preImageOrCodeVerification = async (req) => {
       // Remove consumed verification
       await OneTime.deleteMany({ user: userId });
 
-      return data;
+      return { data: data, type: req.body.type };
 };
 
