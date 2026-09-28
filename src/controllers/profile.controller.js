@@ -222,14 +222,25 @@ export const getMyProfile = async (req, res, next) => {
                         type: "earned",
                         icon: "check_circle",
                   })),
-                  ...allMarkedSpots.map((s, idx) => ({
-                        id: `ldg-mark-${s._id || idx}`,
-                        title: `Reported: ${s.address || "Trash Spot"}`,
-                        date: new Date(s.markedAt || s.createdAt || Date.now()).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-                        amount: 10,
-                        type: "earned",
-                        icon: "add_location_alt",
-                  })),
+                  ...allMarkedSpots.map((s, idx) => {
+                        const isAiVerified = Boolean(
+                              s.isVerified === true ||
+                              s.isAiVerified === true ||
+                              (typeof s.isAiVerified === "object" &&
+                                    s.isAiVerified !== null &&
+                                    s.isAiVerified.isValidWasteReport !== false &&
+                                    !s.isAiVerified.isAiOrEdited &&
+                                    !s.isAiVerified.isFraudulent)
+                        );
+                        return {
+                              id: `ldg-mark-${s._id || idx}`,
+                              title: `Reported: ${s.address || "Trash Spot"}`,
+                              date: new Date(s.markedAt || s.createdAt || Date.now()).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+                              amount: isAiVerified ? 10 : 0,
+                              type: "earned",
+                              icon: "add_location_alt",
+                        };
+                  }),
                   ...(userRewards?.selectedRewards || []).map((r, idx) => ({
                         id: `ldg-rew-${idx}`,
                         title: `Redeemed: ${r.name || "Reward"}`,
