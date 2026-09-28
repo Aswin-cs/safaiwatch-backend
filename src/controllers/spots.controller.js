@@ -6,7 +6,6 @@ import User from "../../models/user.model.js";
 import Post from "../../models/feeds.model.js";
 import { responseHandler } from "../../utils/responseHandler.js";
 import { errorHandler } from "../../utils/errorHandler.js";
-import OneTime from "../../models/one-time.model.js";
 import { deleteFromCloudinary, uploadToCloudinary } from "../../utils/Cloudinaryimage.utils.js";
 import {
       rewardsCalculating,
@@ -124,22 +123,22 @@ const aiVerification = async (req, verificationData, savedSpotId) => {
                               }
                         });
                         (async () => {
+                              if(isvalid?.isAiOrEdited){
                               try {
-                                    await rewardsCalculating(userId, { markedSpotId: savedSpot._id }, "marked");
-                                    await Promise.all([
-                                          streaksCalculated({ user_id: userId }),
-                                          badgesCalculating({ user_id: userId }),
-                                    ]);
+                                    await rewardsCalculating(userId, { markedSpotId: savedSpotId }, "marked");
+                                    await streaksCalculated({ user_id: userId });
+                                    await badgesCalculating({ user_id: userId });
                                     await leaderboardRankCalculated({ user_id: userId });
                               } catch (rewardErr) {
                                     console.error("Background reward calculation error in markSpot:", rewardErr);
                               }
+                        }
                         })();
 
                         if (isVerified) {
                               try {
                                     const populatedSpot = await MarkedSpot.findById(savedSpotId)
-                                          .populate("markedBy", "_id username avatar role email");
+                                          .populate("markedBy", "_id username avatar role");
 
                                     getIo().emit("spot:created", {
                                           spot: populatedSpot,
@@ -219,8 +218,9 @@ export const markSpot = async (req, res, next) => {
             const finalCategory = category || wasteCategory || wasteType || "Mixed Waste";
 
             session.startTransaction();
-
-            const newSpot = new MarkedSpot({
+            const newSpot = await MarkedSpot.findByIdAndUpdate({
+                  _id: isVerified?.id 
+            },{
                   address,
                   type: type === "Point" ? "Point" : "Point",
                   coordinates,
@@ -229,13 +229,24 @@ export const markSpot = async (req, res, next) => {
                   wasteCategory: finalCategory,
                   image: finalImageUrl,
                   imageId: finalImageId,
-                  markedBy: userId,
-                  markedAt: new Date(),
                   critcal: finalCritical,
-            });
 
-            const savedSpot = await newSpot.save({ session });
-            const aiData = await aiVerification(req, isVerified, savedSpot._id);
+            }).session(session);
+            // const newSpot = await MarkedSpot.findByIdAndUpdate({},{
+            //       address,
+            //       type: type === "Point" ? "Point" : "Point",
+            //       coordinates,
+            //       description,
+            //       category: finalCategory,
+            //       wasteCategory: finalCategory,
+            //       image: finalImageUrl,
+            //       imageId: finalImageId,
+            //       markedBy: userId,
+            //       markedAt: new Date(),
+            //       critcal: finalCritical,
+            // });
+
+            const aiData = await aiVerification(req, isVerified,isVerified.id);
             let userStatus = await UserStatus.findOne({
                   $or: [{ user: userId }, { userId }],
             }).session(session);
@@ -251,21 +262,19 @@ export const markSpot = async (req, res, next) => {
             };
 
             userStatus.MarkedSpots.push({
-                  _id: savedSpot._id,
-                  isCompletedBy: userId,
-                  markedAt: savedSpot.markedAt,
+                  _id: isVerified.id,
+                  markedAt: newSpot.markedAt,
             });
 
             userStatus.pendingCount = (userStatus.pendingCount || 0) + 1;
             userStatus.totalCount = (userStatus.totalCount || 0) + 1;
 
             await userStatus.save({ session });
-
             await session.commitTransaction();
             await session.endSession();
 
             // Populate markedBy user object so the response contains the full user details (username, avatar, role)
-            const populatedSpot = await MarkedSpot.findById(savedSpot._id)
+            const populatedSpot = await MarkedSpot.findById({ _id: newSpot._id })
                   .populate("markedBy", "_id username avatar role email");
 
             // Calculate rewards, badges, streaks & leaderboard rank in parallel background task (non-blocking)
@@ -948,10 +957,8 @@ export const completeSpot = async (req, res, next) => {
             (async () => {
                   try {
                         await rewardsCalculating(userId, { markedSpotId: spot._id }, "completed");
-                        await Promise.all([
-                              streaksCalculated({ user_id: userId }),
-                              badgesCalculating({ user_id: userId }),
-                        ]);
+                        await streaksCalculated({ user_id: userId });
+                        await badgesCalculating({ user_id: userId });
                         await leaderboardRankCalculated({ user_id: userId });
                   } catch (rewardErr) {
                         console.error("Background reward calculation error in completeSpot:", rewardErr);
@@ -1046,22 +1053,29 @@ export const getRandomGestureVerification = async (req, res, next) => {
                   return next(errorHandler(404, "Image not found"));
             }
 
-            // Remove any old gesture verifications for this user
-            await OneTime.deleteMany({ user: userId });
-
-            const randomVerification = await OneTime.findOneAndUpdate(
-                  { user: userId },
+            // Upsert existing uncompleted gesture verification for this user
+            const randomVerification = await MarkedSpot.findOneAndUpdate(
+                  { markedBy: userId, isUserCompleted: false },
                   {
                         $set: {
-                              user: userId,
-                              guestureImage: imageUrl,
-                              code: null,
+                              markedBy: userId,
+                              isUserCompleted: false,
+                              verificationtype: "gesture",
+                              verificationGesture: imageUrl,
                               coordinates: coordinates,
-                              expiresAt: new Date(Date.now() + 5 * 60 * 1000),
-                        },
+                              expectedCompletionDate: new Date(Date.now() + 5 * 60 * 1000),
+                              markedAt: new Date(),
+                        }
                   },
                   { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
             );
+
+            // Clean up any duplicate pending verifications for this user
+            await MarkedSpot.deleteMany({
+                  markedBy: userId,
+                  isUserCompleted: false,
+                  _id: { $ne: randomVerification._id }
+            });
 
             return responseHandler(res, 200, "Random gesture verification sent successfully", {
                   imageId: randomVerification._id,
@@ -1095,22 +1109,30 @@ export const getRandomCodeVerification = async (req, res, next) => {
             const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
             const randomCode = Array.from(crypto.randomBytes(4), (b) => chars[b % chars.length]).join("");
 
-            // Remove any old code verifications for this user
-            await OneTime.deleteMany({ user: userId });
-
-            const randomVerification = await OneTime.findOneAndUpdate(
-                  { user: userId },
+            // Upsert existing uncompleted code verification for this user
+            const randomVerification = await MarkedSpot.findOneAndUpdate(
+                  { markedBy: userId, isUserCompleted: false },
                   {
                         $set: {
-                              user: userId,
-                              code: randomCode,
-                              guestureImage: null,
+                              markedBy: userId,
+                              isUserCompleted: false,
+                              verificationtype: "code",
+                              verificationCode: randomCode,
                               coordinates: coordinates,
-                              expiresAt: new Date(Date.now() + 5 * 60 * 1000),
-                        },
+                              expectedCompletionDate: new Date(Date.now() + 5 * 60 * 1000),
+                              markedAt: new Date(),
+                        }
                   },
                   { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
             );
+
+            // Clean up any duplicate pending verifications for this user
+            await MarkedSpot.deleteMany({
+                  markedBy: userId,
+                  isUserCompleted: false,
+                  _id: { $ne: randomVerification._id }
+            });
+
 
             return responseHandler(res, 200, "Random code verification sent successfully", {
                   verificationId: randomVerification._id,
@@ -1129,28 +1151,28 @@ export const preImageOrCodeVerification = async (req) => {
             req.body?.gestureId ||
             req.body?.codeVerificationId ||
             req.body?.codeId;
-      const rawCoords = req.body.coordinates || req.body.geolocation?.coordinates;
-      const coordinates = parseCoordinates(rawCoords);
 
       if (!verificationId || !mongoose.Types.ObjectId.isValid(verificationId)) {
             throw errorHandler(400, "Valid verification ID is required");
       }
 
-      if (!coordinates || coordinates.length !== 2 || coordinates.some(isNaN)) {
-            throw errorHandler(400, "Invalid coordinates provided");
-      }
-
       // Check validity of verificationId
-      const oneTime = await OneTime.findById(verificationId);
+      const oneTime = await MarkedSpot.findById(verificationId);
       if (!oneTime) {
             throw errorHandler(404, "Invalid or expired verification ID");
       }
-
+      if (oneTime.isCodeOrGestureVerified) {
+            throw errorHandler(400, "Verification code/gesture has not been verified yet");
+      }
+      if (oneTime.isUserCompleted) {
+            throw errorHandler(400, "Verification code/gesture has already been used");
+      }
       // Check if verification has expired
-      if (new Date(oneTime.expiresAt).getTime() < Date.now()) {
+      if (new Date(oneTime.expectedCompletionDate).getTime() < Date.now()) {
             await OneTime.findByIdAndDelete(verificationId);
             throw errorHandler(400, "Verification code/gesture has expired");
       }
+      
 
       const userId = req.user?._id?.toString() || req.user?.id || "";
       if (!userId) {
@@ -1158,7 +1180,7 @@ export const preImageOrCodeVerification = async (req) => {
       }
 
       // Check user ownership
-      if (oneTime.user && oneTime.user.toString() !== userId) {
+      if (oneTime.markedBy && oneTime.markedBy.toString() !== userId) {
             throw errorHandler(403, "Verification does not belong to this user");
       }
 
@@ -1171,17 +1193,18 @@ export const preImageOrCodeVerification = async (req) => {
             throw errorHandler(400, "Coordinator cannot perform this action");
       }
 
-      // Compare coordinates (with minor float tolerance)
-      const lngDiff = Math.abs(Number(oneTime.coordinates[0]) - Number(coordinates[0]));
-      const latDiff = Math.abs(Number(oneTime.coordinates[1]) - Number(coordinates[1]));
-      if (lngDiff > 0.001 || latDiff > 0.001) {
-            throw errorHandler(400, "Verification location coordinates do not match");
-      }
       const data = req.body.type == "gesture" ? oneTime.guestureImage : oneTime.code;
 
       // Remove consumed verification
-      await OneTime.deleteMany({ user: userId });
+      await MarkedSpot.findOneAndUpdate(
+            { _id: verificationId, markedBy: userId, isUserCompleted: false },
+            {
+                  isUserCompleted: true,
+                  isCodeOrGestureVerified: true,
+                  expectedCompletionDate: new Date(),
+            }
+      );
 
-      return { data: data, type: req.body.type };
+      return {data:oneTime.verificationtype == "gesture" ? oneTime.verificationGesture : oneTime.verificationCode, type:oneTime.verificationtype,id:oneTime._id};
 };
 

@@ -32,7 +32,7 @@ const rewardsCalculating = async (userId, detailsOfCompletingTheSpot, which) => 
                   await UserRewards.findOneAndUpdate(
                         { user: completerId },
                         { $inc: { karmaPoints: karmaInc, SellingPoints: sellingInc } },
-                        { upsert: true, new: true }
+                        { upsert: true, returnDocument: 'after' }
                   );
             } else if (which === "marked") {
                   let karmaInc = 5;
@@ -52,7 +52,7 @@ const rewardsCalculating = async (userId, detailsOfCompletingTheSpot, which) => 
                   await UserRewards.findOneAndUpdate(
                         { user: spot.markedBy },
                         { $inc: { karmaPoints: karmaInc, SellingPoints: sellingInc } },
-                        { upsert: true, new: true }
+                        { upsert: true, returnDocument: 'after' }
                   );
             }
 
@@ -114,7 +114,11 @@ const badgesCalculating = async (user) => {
                   }
             }
 
-            await userRewards.save();
+            await UserRewards.findOneAndUpdate(
+                  { $or: [{ user: userId }, { userId }] },
+                  { $set: { badges: userRewards.badges } },
+                  { upsert: true, returnDocument: 'after' }
+            );
             return { success: true, message: "Badges calculated successfully" };
       } catch (error) {
             console.error("Error in badgesCalculating:", error);
@@ -321,20 +325,30 @@ const streaksCalculated = async (user) => {
 
             longestStreak = Math.max(longestStreak, targetRewards.longestStreak || 0, currentStreak);
 
-            // Update userRewards and userStatus
-            targetRewards.currentStreak = currentStreak;
-            targetRewards.longestStreak = longestStreak;
-            targetRewards.lastStreakDate = now;
-
-            // Re-sync activeDays array as array of Date objects
-            targetRewards.activeDays = sortedDates.map((dStr) => new Date(`${dStr}T12:00:00.000Z`));
-
-            await targetRewards.save();
+            // Update userRewards atomically to prevent version collision
+            await UserRewards.findOneAndUpdate(
+                  { $or: [{ user: userId }, { userId }] },
+                  {
+                        $set: {
+                              currentStreak,
+                              longestStreak,
+                              lastStreakDate: now,
+                              activeDays: sortedDates.map((dStr) => new Date(`${dStr}T12:00:00.000Z`)),
+                        }
+                  },
+                  { upsert: true, returnDocument: 'after' }
+            );
 
             if (userStatus) {
-                  userStatus.streaks = currentStreak;
-                  userStatus.lastActiveAt = now;
-                  await userStatus.save();
+                  await UserStatus.findOneAndUpdate(
+                        { $or: [{ user: userId }, { userId }] },
+                        {
+                              $set: {
+                                    streaks: currentStreak,
+                                    lastActiveAt: now,
+                              }
+                        }
+                  );
             }
 
             return {

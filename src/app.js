@@ -6,7 +6,7 @@ import profileRouter from './routes/profile.routes.js';
 import spotsRouter from './routes/spots.routes.js';
 import feedsRouter from './routes/feeds.routes.js';
 import nodeCron from 'node-cron';
-import OneTime from "../models/one-time.model.js";
+import MarkedSpot from "../models/markedSpots.model.js";
 
 const app = express();
 
@@ -14,8 +14,12 @@ nodeCron.schedule("*/5 * * * *", async () => {
   try {
     const now = new Date();
     const fiveMinutesAgo = new Date(now - 5 * 60 * 1000);
-    await OneTime.deleteMany({
-      createdAt: { $lt: fiveMinutesAgo }
+    await MarkedSpot.deleteMany({
+      isUserCompleted: false,
+      $or: [
+        { markedAt: { $lt: fiveMinutesAgo } },
+        { expectedCompletionDate: { $lt: now } }
+      ]
     });
     console.log("Old one-time codes deleted successfully");
   } catch (error) {

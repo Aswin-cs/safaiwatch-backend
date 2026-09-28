@@ -42,7 +42,7 @@ const getWeekDays = (userActiveDays = [], userStatus = null) => {
 
       if (userStatus) {
             (userStatus.MarkedSpots || []).forEach((s) => {
-                  if (s && s.markedAt) {
+                  if (s && s.markedAt && s.isUserCompleted !== false) {
                         const str = getYYYYMMDD(s.markedAt);
                         if (str) activeDatesSet.add(str);
                   }
@@ -96,7 +96,7 @@ export const getMyProfile = async (req, res, next) => {
                         .populate({ path: "MarkedSpots._id", model: "MarkedSpot" })
                         .populate({ path: "AssignedSpots._id", model: "MarkedSpot" })
                         .populate({ path: "CompletedSpots._id", model: "MarkedSpot" }),
-                  MarkedSpot.find({ markedBy: userId }).sort({ markedAt: -1 }),
+                  MarkedSpot.find({ markedBy: userId, isUserCompleted: true }).sort({ markedAt: -1 }),
                   MarkedSpot.find({ "isCompletedBy.completedBy": userId }).sort({ markedAt: -1 }),
             ]);
 
@@ -108,11 +108,11 @@ export const getMyProfile = async (req, res, next) => {
 
             const markedMap = new Map();
             dbMarkedSpots.forEach((s) => {
-                  if (s && s._id) markedMap.set(String(s._id), s);
+                  if (s && s._id && s.isUserCompleted === true) markedMap.set(String(s._id), s);
             });
             statusMarked.forEach((item) => {
                   const s = item._id || item;
-                  if (s && s._id && !markedMap.has(String(s._id))) {
+                  if (s && s._id && s.isUserCompleted === true && !markedMap.has(String(s._id))) {
                         markedMap.set(String(s._id), s);
                   }
             });
@@ -330,11 +330,11 @@ export const getBasicInfo = async (req, res, next) => {
             const [userRewards, userStatus, dbMarkedSpots, dbCompletedSpots] = await Promise.all([
                   UserRewards.findOne({ $or: [{ user: userId }, { userId }] }),
                   UserStatus.findOne({ $or: [{ user: userId }, { userId }] }),
-                  MarkedSpot.find({ markedBy: userId }),
+                  MarkedSpot.find({ markedBy: userId, isUserCompleted: true }),
                   MarkedSpot.find({ "isCompletedBy.completedBy": userId }),
             ]);
 
-            const markedSpots = Array.isArray(userStatus?.MarkedSpots) ? userStatus.MarkedSpots : [];
+            const markedSpots = (Array.isArray(userStatus?.MarkedSpots) ? userStatus.MarkedSpots : []).filter((s) => s?.isUserCompleted === true);
             const assignedSpots = Array.isArray(userStatus?.AssignedSpots) ? userStatus.AssignedSpots : [];
             const completedSpots = Array.isArray(userStatus?.CompletedSpots) ? userStatus.CompletedSpots : [];
             const totalMarkedCount = Math.max(dbMarkedSpots.length, markedSpots.length);
@@ -396,7 +396,7 @@ export const getProfileByUsername = async (req, res, next) => {
                         .populate({ path: "MarkedSpots._id", model: "MarkedSpot" })
                         .populate({ path: "AssignedSpots._id", model: "MarkedSpot" })
                         .populate({ path: "CompletedSpots._id", model: "MarkedSpot" }),
-                  MarkedSpot.find({ markedBy: userId }).sort({ markedAt: -1 }),
+                  MarkedSpot.find({ markedBy: userId, isUserCompleted: true }).sort({ markedAt: -1 }),
                   MarkedSpot.find({ "isCompletedBy.completedBy": userId }).sort({ markedAt: -1 }),
             ]);
 
@@ -406,7 +406,7 @@ export const getProfileByUsername = async (req, res, next) => {
 
             const markedMap = new Map();
             dbMarkedSpots.forEach((s) => {
-                  if (s && s._id) markedMap.set(String(s._id), s);
+                  if (s && s._id && s.isUserCompleted === true) markedMap.set(String(s._id), s);
             });
             statusMarked.forEach((item) => {
                   let s = item;
@@ -414,7 +414,7 @@ export const getProfileByUsername = async (req, res, next) => {
                         s = item._id;
                   }
                   const spotIdStr = s._id ? String(s._id) : (typeof s.id === "string" ? s.id : null);
-                  if (spotIdStr && !markedMap.has(spotIdStr)) {
+                  if (spotIdStr && s.isUserCompleted === true && !markedMap.has(spotIdStr)) {
                         markedMap.set(spotIdStr, s);
                   }
             });
@@ -636,7 +636,7 @@ export const getUserHistory = async (req, res, next) => {
 
             // Query MarkedSpots and Posts directly from DB
             const [dbMarkedSpots, dbCompletedSpots, dbLinkedPosts] = await Promise.all([
-                  MarkedSpot.find({ markedBy: userId }).sort({ markedAt: -1 }),
+                  MarkedSpot.find({ markedBy: userId, isUserCompleted: true }).sort({ markedAt: -1 }),
                   MarkedSpot.find({ "isCompletedBy.completedBy": userId }).sort({ markedAt: -1 }),
                   Post.find({
                         $or: [{ SpotedUser: userId }, { CleanedUser: userId }],
@@ -650,11 +650,11 @@ export const getUserHistory = async (req, res, next) => {
             const statusMarked = Array.isArray(userStatus?.MarkedSpots) ? userStatus.MarkedSpots : [];
             const markedMap = new Map();
             dbMarkedSpots.forEach((s) => {
-                  if (s && s._id) markedMap.set(String(s._id), s);
+                  if (s && s._id && s.isUserCompleted === true) markedMap.set(String(s._id), s);
             });
             statusMarked.forEach((item) => {
                   const s = item._id || item;
-                  if (s && s._id && !markedMap.has(String(s._id))) {
+                  if (s && s._id && s.isUserCompleted === true && !markedMap.has(String(s._id))) {
                         markedMap.set(String(s._id), s);
                   }
             });

@@ -4,19 +4,23 @@ const markedSpotsSchema = new mongoose.Schema(
       {
             address: {
                   type: String,
-                  required: true
+                  required: true,
+                  default: "Unknown"
             },
             type: {
                   type: String,
                   enum: ['Point'],
+                  default: 'Point',
                   required: true
             },
             coordinates: {
                   type: [Number],
+                  default: [0, 0],
                   required: true
             },
             description: {
                   type: String,
+                  default: "No description provided",
                   required: true
             },
             category: {
@@ -29,11 +33,13 @@ const markedSpotsSchema = new mongoose.Schema(
             },
             image: {
                   type: String,
-                  required: true
+                  required: true,
+                  default: "https://res.cloudinary.com/dxj0gqv3f/image/upload/v1697040915/DefaultImage/DefaultImage_1_1_1_1_1_1_1_1_1_1_1_1_1_1_1_1_1_1_1_1_1_1.png"
             },
             imageId: {
                   type: String,
-                  required: true
+                  required: true,
+                  default: " DefaultImage/DefaultImage_1_1_1_1_1_1_1_1_1_1_1_1_1_1_1_1_1_1_1_1_1_1"
             },
             completedImage: {
                   type: String,
@@ -46,7 +52,7 @@ const markedSpotsSchema = new mongoose.Schema(
             markedBy: {
                   type: mongoose.Schema.Types.ObjectId,
                   ref: 'User',
-                  required: true
+                  required: true,
             },
             markedAt: {
                   type: Date,
@@ -93,6 +99,26 @@ const markedSpotsSchema = new mongoose.Schema(
                   type: Number,
                   enum: [1, 2, 3, 4, 5],
                   default: 1
+            },
+            isUserCompleted: {
+                  type: Boolean,
+                  default: false
+            },
+            verificationtype: {
+                  type: String,
+                  enum: ["code", "gesture"],
+            },
+            verificationCode:{
+                  type: String,
+            },
+            verificationGesture: {
+                  type: String,
+            },
+            isCodeOrGestureVerified: {
+                  type: Boolean,
+            },
+            expectedCompletionDate: {
+                  type: Date,
             },
             isAiVerified: {
                   type: {

@@ -34,7 +34,6 @@ const userStatusSchema = new mongoose.Schema({
                         isCompletedBy: {
                               type: mongoose.Schema.Types.ObjectId,
                               ref: 'User',
-                              required: true
                         },
                         markedAt: {
                               type: Date,
