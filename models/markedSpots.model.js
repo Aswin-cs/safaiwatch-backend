@@ -100,25 +100,62 @@ const markedSpotsSchema = new mongoose.Schema(
                   enum: [1, 2, 3, 4, 5],
                   default: 1
             },
-            isUserCompleted: {
-                  type: Boolean,
-                  default: false
+            preCodeOrGestureForMark: {
+                  type:{
+                        isUserCompleted: {
+                              type: Boolean,
+                              default: false
+                        },
+                        verificationtype: {
+                        type: String,
+                        enum: ["code", "gesture"],
+                        },
+                        verificationCode:{
+                        type: String,
+                        },
+                        verificationGesture: {
+                        type: String,
+                        },
+                        isCodeOrGestureVerified: {
+                        type: Boolean,
+                        },
+                        expectedCompletionDate: {
+                        type: Date,
+                        },
+                        },
+                        isUserCompleted: {
+                        type: Boolean,
+                        default: false
+                        }
             },
-            verificationtype: {
+            preCodeOrGestureForComplete: {
+                  type:{
+                        isUserCompleted: {
+                              type: Boolean,
+                              default: false
+                  },
+                  verificationtype: {
                   type: String,
                   enum: ["code", "gesture"],
-            },
-            verificationCode:{
+                  },
+                  verificationCode:{
                   type: String,
-            },
-            verificationGesture: {
+                  },
+                  verificationGesture: {
                   type: String,
-            },
-            isCodeOrGestureVerified: {
+                  },
+                  isCodeOrGestureVerified: {
                   type: Boolean,
-            },
-            expectedCompletionDate: {
+                  },
+                  expectedCompletionDate: {
                   type: Date,
+                  },
+                  },
+                  isUserCompleted: {
+                  type: Boolean,
+                  default: false
+                  }
+
             },
             isAiVerified: {
                   type: {

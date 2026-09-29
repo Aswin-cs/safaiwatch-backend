@@ -28,6 +28,10 @@ const rewardsCalculating = async (userId, detailsOfCompletingTheSpot, which) => 
                         karmaInc = 25;
                         sellingInc = 25;
                   }
+                  else if (spot.critcal === "Low") {
+                        karmaInc = 15;
+                        sellingInc = 15;
+                  }
 
                   await UserRewards.findOneAndUpdate(
                         { user: completerId },
@@ -38,11 +42,11 @@ const rewardsCalculating = async (userId, detailsOfCompletingTheSpot, which) => 
                   let karmaInc = 5;
                   let sellingInc = 5;
                   if (spot.critcal === "High" || spot.critcal === "Very High") {
-                        karmaInc = 25;
-                        sellingInc = 25;
+                        karmaInc = 20;
+                        sellingInc = 20;
                   } else if (spot.critcal === "Medium") {
-                        karmaInc = 15;
-                        sellingInc = 15;
+                        karmaInc = 10;
+                        sellingInc = 10;
                   }
                   else if (spot.critcal === "Low") {
                         karmaInc = 5;
@@ -54,6 +58,7 @@ const rewardsCalculating = async (userId, detailsOfCompletingTheSpot, which) => 
                         { $inc: { karmaPoints: karmaInc, SellingPoints: sellingInc } },
                         { upsert: true, returnDocument: 'after' }
                   );
+
             }
 
             return { success: true, message: "Rewards calculated successfully" };
@@ -128,35 +133,48 @@ const badgesCalculating = async (user) => {
 
 const PriceList = [
       {
-            category: "clothing",
-            rewards: [
-                  { name: "Tshirt", points: 500 },
-                  { name: "Mug", points: 1000 },
-                  { name: "Notebook", points: 500 },
-            ],
-      },
-      {
             category: "gift card",
             rewards: [
-                  { name: "Amazon Gift Card", points: 1000 },
-                  { name: "Flipkart Gift Card", points: 1000 },
+                  { name: "BookMyShow ₹100 Movie Pass", points: 400, description: "Valid on any movie ticket or event booking nationwide. Instant coupon code.", icon: "movie", badge: "POPULAR" },
+                  { name: "Amazon Pay ₹250 Gift Voucher", points: 550, description: "Add ₹250 directly to your Amazon Pay wallet for shopping & bill payments.", icon: "shopping_cart", badge: "TRENDING" },
+                  { name: "Amazon Gift Card", points: 1000, description: "Amazon ₹1,000 e-Gift Voucher redeemable across all products online.", icon: "card_giftcard", badge: "POPULAR" },
+                  { name: "Flipkart Gift Card", points: 1000, description: "Flipkart ₹1,000 e-Gift Voucher redeemable on top brands.", icon: "shopping_bag" },
             ],
       },
       {
             category: "free meal",
             rewards: [
-                  { name: "Pizza", points: 500 },
-                  { name: "Burger", points: 500 },
+                  { name: "Organic Juice Bar Wellness Pass", points: 250, description: "Complimentary cold-pressed organic detox juice at participating health bars.", icon: "local_bar" },
+                  { name: "Cafe Coffee Day Hot Beverage Pass", points: 300, description: "Free hot cappuccino or cold coffee pass redeemable at any CCD branch.", icon: "local_cafe" },
+                  { name: "Swiggy ₹150 Gourmet Meal Pass", points: 350, description: "Enjoy ₹150 discount on any food delivery order across top city restaurants.", icon: "restaurant", badge: "BEST VALUE" },
+                  { name: "Pizza", points: 500, description: "Complimentary gourmet pizza voucher at partner pizzerias.", icon: "local_pizza" },
+                  { name: "Burger", points: 500, description: "Free delicious gourmet burger combo meal voucher.", icon: "lunch_dining" },
+            ],
+      },
+      {
+            category: "clothing",
+            rewards: [
+                  { name: "SafaiWatch Eco Cotton Tote Bag", points: 400, description: "Ultra-durable 100% recycled cotton tote bag with reinforced handles.", icon: "shopping_bag" },
+                  { name: "Field Volunteer Reflective Cap", points: 450, description: "Breathable dark-green cotton cap with 3M reflective SafaiWatch emblem.", icon: "military_tech" },
+                  { name: "Tshirt", points: 500, description: "Official SafaiWatch Volunteer 100% Organic Cotton T-Shirt.", icon: "checkroom", sizes: ["S", "M", "L", "XL"], badge: "LIMITED SWAG" },
+                  { name: "Notebook", points: 500, description: "Eco-friendly Recycled Paper Civic Ranger Field Journal.", icon: "menu_book" },
+                  { name: "Civic Ranger Embroidered Tee", points: 600, description: "Heavyweight 100% organic cotton tee with reflective Civic Ranger chest badge.", icon: "checkroom", sizes: ["S", "M", "L", "XL"], badge: "LIMITED SWAG" },
+                  { name: "Mug", points: 1000, description: "SafaiWatch Premium Ceramic Coffee Mug with Civic Badge.", icon: "local_cafe" },
             ],
       },
 ];
 
 const selectedRewards = async (user, rewardName, clothSize = null) => {
       const userId = user?.user_id || user?._id || user?.id || user;
+      if (!userId) {
+            return { success: false, message: "User not identified" };
+      }
 
       let foundReward = null;
       for (const item of PriceList) {
-            const match = item.rewards.find((r) => r.name === rewardName);
+            const match = item.rewards.find(
+                  (r) => r.name.toLowerCase() === rewardName?.toString().toLowerCase().trim()
+            );
             if (match) {
                   foundReward = { ...match, category: item.category };
                   break;
@@ -164,28 +182,62 @@ const selectedRewards = async (user, rewardName, clothSize = null) => {
       }
 
       if (!foundReward) {
-            return { success: false, message: "Reward not found" };
+            return { success: false, message: `Reward "${rewardName}" not found in catalogue` };
       }
-      const userRewards = await UserRewards.findOne({ user: userId });
+
+      let userRewards = await UserRewards.findOne({ $or: [{ user: userId }, { userId }] });
       if (!userRewards) {
-            return { success: false, message: "User rewards not found" };
+            userRewards = new UserRewards({ user: userId });
       }
-      if (userRewards.karmaPoints < foundReward.points) {
-            return { success: false, message: "Insufficient points" };
+
+      const availableBalance = userRewards.SellingPoints > 0 ? userRewards.SellingPoints : (userRewards.karmaPoints || 0);
+      if (availableBalance < foundReward.points) {
+            return {
+                  success: false,
+                  message: `Insufficient points. You need ${foundReward.points} points, but have ${availableBalance} points.`,
+            };
       }
+
       if (foundReward.category === "clothing" && !clothSize) {
-            return { success: false, message: "Cloth size is required" };
+            return { success: false, message: "Cloth size (S, M, L, XL) is required for clothing rewards" };
       }
-      userRewards.SellingPoints = (userRewards.SellingPoints || 0) - foundReward.points;
-      userRewards.selectedRewards.push({
+
+      if (foundReward.category === "clothing" && clothSize) {
+            const validSizes = ["S", "M", "L", "XL"];
+            if (!validSizes.includes(clothSize)) {
+                  return { success: false, message: "Invalid cloth size. Valid options are S, M, L, XL" };
+            }
+      }
+
+      // Deduct points
+      userRewards.SellingPoints = Math.max(0, (userRewards.SellingPoints || userRewards.karmaPoints || 0) - foundReward.points);
+      userRewards.karmaPoints = Math.max(0, (userRewards.karmaPoints || 0) - foundReward.points);
+
+      const newClaim = {
             category: foundReward.category,
             name: foundReward.name,
             pointsSpent: foundReward.points,
             dateSelected: new Date(),
-            clothSize: clothSize,
-      });
+            clothSize: clothSize || undefined,
+      };
+
+      if (!Array.isArray(userRewards.selectedRewards)) {
+            userRewards.selectedRewards = [];
+      }
+      userRewards.selectedRewards.unshift(newClaim);
       await userRewards.save();
-      return { success: true, message: "Reward selected successfully" };
+
+      return {
+            success: true,
+            message: "Reward selected successfully",
+            claimedReward: newClaim,
+            userRewards: {
+                  karmaBalance: userRewards.karmaPoints,
+                  karmaPoints: userRewards.karmaPoints,
+                  SellingPoints: userRewards.SellingPoints,
+                  selectedRewards: userRewards.selectedRewards,
+            },
+      };
 };
 
 const leaderboardRankCalculated = async (user) => {
@@ -365,6 +417,7 @@ const streaksCalculated = async (user) => {
 };
 
 export {
+      PriceList,
       rewardsCalculating,
       badgesCalculating,
       leaderboardRankCalculated,

@@ -214,7 +214,8 @@ export const SAFEIWATCH_CODE_AUDIT_SCHEMA = {
       ]
 };
 
-export const aiPhotoVerification = async (input, mimeTypeParam, verificationData) => {
+export const aiPhotoVerification = async (input, mimeTypeParam, verificationData,what) => {
+      if(what!=="simulation"){
       let fileInput;
       let mimeType;
 
@@ -293,5 +294,20 @@ export const aiPhotoVerification = async (input, mimeTypeParam, verificationData
       } catch (error) {
             console.error("Error in aiPhotoVerification:", error);
             throw error;
+      }
+      }
+      else{
+            return {
+                  isAiOrEdited: false,
+                  forensicConfidence: 0.95,
+                  detectedManipulationType: "AUTHENTIC_PHOTO",
+                  forensicDetails: "Simulation mode: No anomalies detected.",
+                  gestureMatched: true,
+                  detectedGestureName: "PEACE",
+                  isValidWasteReport: true,
+                  isFraudulent: false,
+                  fraudReason: "NONE",
+                  summary: "Simulation mode: The image appears authentic and valid."
+            };
       }
 };

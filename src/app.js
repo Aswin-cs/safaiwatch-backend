@@ -5,6 +5,7 @@ import authRouter from './routes/auth.routes.js';
 import profileRouter from './routes/profile.routes.js';
 import spotsRouter from './routes/spots.routes.js';
 import feedsRouter from './routes/feeds.routes.js';
+import rewardsRouter from './routes/rewards.routes.js';
 import nodeCron from 'node-cron';
 import MarkedSpot from "../models/markedSpots.model.js";
 
@@ -13,14 +14,45 @@ const app = express();
 nodeCron.schedule("*/5 * * * *", async () => {
   try {
     const now = new Date();
-    const fiveMinutesAgo = new Date(now - 5 * 60 * 1000);
+    const fiveMinutesAgo = new Date(now.getTime() - 5 * 60 * 1000);
     await MarkedSpot.deleteMany({
-      isUserCompleted: false,
-      $or: [
-        { markedAt: { $lt: fiveMinutesAgo } },
-        { expectedCompletionDate: { $lt: now } }
+      $and: [
+        {
+          $or: [
+            { "preCodeOrGestureForMark.isUserCompleted": false },
+          ]
+        },
+        {
+          $or: [
+            { markedAt: { $lt: fiveMinutesAgo } },
+            { "preCodeOrGestureForMark.expectedCompletionDate": { $lt: now } },
+            { expectedCompletionDate: { $lt: now } }
+          ]
+        }
       ]
     });
+    await MarkedSpot.updateMany(
+      {
+        $and: [
+          {
+            $or: [
+              { "preCodeOrGestureForComplete.isUserCompleted": false },
+            ]
+          },
+          {
+            $or: [
+              { "preCodeOrGestureForComplete.expectedCompletionDate": { $lt: now } },
+              { expectedCompletionDate: { $lt: now } }
+            ]
+          }
+        ]
+      },
+      {
+        $set: {
+          preCodeOrGestureForComplete: {}
+        }
+      }
+    );
     console.log("Old one-time codes deleted successfully");
   } catch (error) {
     console.error("Error deleting old one-time codes:", error);
@@ -46,5 +78,7 @@ app.use('/api/v1/profile', profileRouter);
 app.use('/api/v1/spots', spotsRouter);
 app.use('/api/v1/feeds', feedsRouter);
 app.use('/feed', feedsRouter);
+app.use('/api/v1/rewards', rewardsRouter);
+app.use('/api/v1/reward', rewardsRouter);
 
 export default app;

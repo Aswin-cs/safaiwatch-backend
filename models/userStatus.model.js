@@ -35,6 +35,10 @@ const userStatusSchema = new mongoose.Schema({
                               type: mongoose.Schema.Types.ObjectId,
                               ref: 'User',
                         },
+                        karmaPoints: {
+                              type: Number,
+                              default: 0
+                        },
                         markedAt: {
                               type: Date,
                               default: Date.now
@@ -92,6 +96,10 @@ const userStatusSchema = new mongoose.Schema({
                               type: mongoose.Schema.Types.ObjectId,
                               ref: 'User',
                               required: true
+                        },
+                        karmaPoints: {
+                              type: Number,
+                              default: 0
                         },
                         completedAt: {
                               type: Date,
