@@ -295,6 +295,7 @@ export const getMyProfile = async (req, res, next) => {
                         weekDays: weekDays,
                         freezeShields: userRewards?.freezeShields ?? 1,
                         ledger: userLedger,
+                        selectedRewards: userRewards?.selectedRewards ?? [],
                   },
                   userStatus: {
                         reportedSpots: allMarkedSpots.length,
@@ -573,6 +574,7 @@ export const getProfileByUsername = async (req, res, next) => {
                         activeDays: userRewards?.activeDays ?? [],
                         weekDays: weekDays,
                         freezeShields: userRewards?.freezeShields ?? 1,
+                        selectedRewards: userRewards?.selectedRewards ?? [],
                   },
                   userStatus: {
                         reportedSpots: allMarkedSpots.length,
@@ -966,6 +968,91 @@ export const updateProfile = async (req, res, next) => {
             });
       } catch (error) {
             console.error("Error in updateProfile:", error);
+            return next(errorHandler(500, error.message || "Internal Server Error"));
+      }
+};
+
+export const redeemReward = async (req, res, next) => {
+      try {
+            const userId = req.user?._id;
+            if (!userId) {
+                  return next(errorHandler(401, "Unauthorized"));
+            }
+            const { name, category, cost, pointsSpent, clothSize } = req.body;
+            if (!name) {
+                  return next(errorHandler(400, "Reward name is required"));
+            }
+
+            const pointsRequired = Number(cost || pointsSpent || 0);
+            if (isNaN(pointsRequired) || pointsRequired <= 0) {
+                  return next(errorHandler(400, "Valid point cost is required"));
+            }
+
+            const validCategories = ["gift card", "free meal", "clothing"];
+            const rewardCategory = validCategories.includes(category) ? category : "gift card";
+
+            if (rewardCategory === "clothing" && clothSize) {
+                  const validSizes = ["S", "M", "L", "XL"];
+                  if (!validSizes.includes(clothSize)) {
+                        return next(errorHandler(400, "Invalid cloth size"));
+                  }
+            }
+
+            let userRewards = await UserRewards.findOne({ $or: [{ user: userId }, { userId }] });
+            if (!userRewards) {
+                  userRewards = new UserRewards({ user: userId });
+            }
+
+            const availableBalance = userRewards.SellingPoints > 0 ? userRewards.SellingPoints : userRewards.karmaPoints;
+            if (availableBalance < pointsRequired) {
+                  return next(errorHandler(400, "Insufficient Karma points to redeem this reward"));
+            }
+
+            // Deduct points and push to selectedRewards array in UserRewards model
+            userRewards.SellingPoints = Math.max(0, (userRewards.SellingPoints || 0) - pointsRequired);
+            userRewards.karmaPoints = Math.max(0, (userRewards.karmaPoints || 0) - pointsRequired);
+
+            const newClaim = {
+                  category: rewardCategory,
+                  name: name,
+                  clothSize: clothSize || undefined,
+                  pointsSpent: pointsRequired,
+                  dateSelected: new Date(),
+            };
+
+            userRewards.selectedRewards.unshift(newClaim);
+            await userRewards.save();
+
+            return responseHandler(res, 200, "Reward redeemed successfully", {
+                  userRewards: {
+                        karmaBalance: userRewards.karmaPoints,
+                        SellingPoints: userRewards.SellingPoints,
+                        selectedRewards: userRewards.selectedRewards,
+                  },
+                  claimedReward: newClaim,
+            });
+      } catch (error) {
+            console.error("Error in redeemReward:", error);
+            return next(errorHandler(500, error.message || "Internal Server Error"));
+      }
+};
+
+export const getUserRewardsHistory = async (req, res, next) => {
+      try {
+            const userId = req.user?._id;
+            if (!userId) {
+                  return next(errorHandler(401, "Unauthorized"));
+            }
+            const userRewards = await UserRewards.findOne({ $or: [{ user: userId }, { userId }] });
+            const selectedRewards = userRewards?.selectedRewards || [];
+
+            return responseHandler(res, 200, "User rewards history", {
+                  selectedRewards,
+                  karmaBalance: userRewards?.karmaPoints ?? 0,
+                  SellingPoints: userRewards?.SellingPoints ?? 0,
+            });
+      } catch (error) {
+            console.error("Error in getUserRewardsHistory:", error);
             return next(errorHandler(500, error.message || "Internal Server Error"));
       }
 };
