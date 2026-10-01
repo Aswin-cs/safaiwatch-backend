@@ -54,13 +54,17 @@ const userStatusSchema = new mongoose.Schema({
                               type: mongoose.Schema.Types.ObjectId,
                               ref: 'MarkedSpot'
                         },
-                        assignedBy: {
-                              type: mongoose.Schema.Types.ObjectId,
-                              ref: 'User'
-                        },
+                        // assignedBy: {
+                        //       type: mongoose.Schema.Types.ObjectId,
+                        //       ref: 'User'
+                        // },
                         assignedAt: {
                               type: Date,
                               default: Date.now
+                        },
+                        isPending:{
+                              type: Boolean,
+                              default: false
                         }
                   }
             ],
@@ -73,10 +77,10 @@ const userStatusSchema = new mongoose.Schema({
                               type: mongoose.Schema.Types.ObjectId,
                               ref: 'MarkedSpot'
                         },
-                        deletedBy: {
-                              type: mongoose.Schema.Types.ObjectId,
-                              ref: 'User'
-                        },
+                        // deletedBy: {
+                        //       type: mongoose.Schema.Types.ObjectId,
+                        //       ref: 'User'
+                        // },
                         deletedAt: {
                               type: Date,
                               default: Date.now
@@ -92,11 +96,11 @@ const userStatusSchema = new mongoose.Schema({
                               type: mongoose.Schema.Types.ObjectId,
                               ref: 'MarkedSpot'
                         },
-                        assignedBy: {
-                              type: mongoose.Schema.Types.ObjectId,
-                              ref: 'User',
-                              required: true
-                        },
+                        // assignedBy: {
+                        //       type: mongoose.Schema.Types.ObjectId,
+                        //       ref: 'User',
+                        //       required: true
+                        // },
                         karmaPoints: {
                               type: Number,
                               default: 0

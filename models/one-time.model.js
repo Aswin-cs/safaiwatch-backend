@@ -1,34 +1,50 @@
 import mongoose from "mongoose";
 
 const oneTimeSchema = new mongoose.Schema({
-      guestureImage: {
+      user: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "User",
+            required: true
+      },
+      markspotid: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Markspot",
+            required: true
+      },
+      image:{
             type: String,
       },
-      imageId: {
+      imageId:{
+            type: String,
+      },
+      guestureImage:{
+            type: String,
+      },
+      guestureImageId:{
             type: String,
       },
       code: {
             type: String,
       },
-      coordinates: {
-            type: [Number],
-            required: true,
-            default: [0, 0]
-      },
-      user: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: "User"
-      },
-
-      feedbackImage: {
+      message: {
             type: String,
+            default: ""
       },
-      feedbackImageId: {
+      status: {
             type: String,
+            enum: ["pending", "verified", "failed"],
+            default: "pending"
       },
-      expiresAt: {
+      isVerified: {
+            type: Boolean,
+            default: false
+      },
+      aiAuditResult: {
+            type: mongoose.Schema.Types.Mixed,
+      },
+      expirationDate: {
             type: Date,
-            required: true
+            default: () => new Date(Date.now() + 24 * 60 * 60 * 1000)
       }
 }, { timestamps: true })
 

@@ -124,38 +124,9 @@ const markedSpotsSchema = new mongoose.Schema(
                         },
                         },
                         isUserCompleted: {
-                        type: Boolean,
-                        default: false
-                        }
-            },
-            preCodeOrGestureForComplete: {
-                  type:{
-                        isUserCompleted: {
                               type: Boolean,
                               default: false
-                  },
-                  verificationtype: {
-                  type: String,
-                  enum: ["code", "gesture"],
-                  },
-                  verificationCode:{
-                  type: String,
-                  },
-                  verificationGesture: {
-                  type: String,
-                  },
-                  isCodeOrGestureVerified: {
-                  type: Boolean,
-                  },
-                  expectedCompletionDate: {
-                  type: Date,
-                  },
-                  },
-                  isUserCompleted: {
-                  type: Boolean,
-                  default: false
-                  }
-
+                        }
             },
             isAiVerified: {
                   type: {

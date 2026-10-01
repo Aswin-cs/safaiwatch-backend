@@ -10,6 +10,7 @@ import {
       rateSpot,
       getRandomGestureVerification,
       getRandomCodeVerification,
+      deleteOneTimeVerification,
 } from "../controllers/spots.controller.js";
 import { authorize } from "../middlewares/authorize.middleware.js";
 import multer from "multer";
@@ -43,6 +44,8 @@ spotsRouter.get("/:id", getMarkedSpot);
 spotsRouter.post("/", authorize("Hybrid", "Civilian", "hybrid", "civilian"), upload.single("image"), markSpot);
 spotsRouter.put("/:id", authorize(), upload.single("image"), updateSpot);
 spotsRouter.delete("/:id", authorize(), deleteSpot);
+spotsRouter.delete("/:id/one-time", authorize(), deleteOneTimeVerification);
+spotsRouter.delete("/one-time/:id", authorize(), deleteOneTimeVerification);
 
 // Status transition routes
 spotsRouter.patch("/:id/assign", authorize(), assignSpot);

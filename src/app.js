@@ -8,6 +8,7 @@ import feedsRouter from './routes/feeds.routes.js';
 import rewardsRouter from './routes/rewards.routes.js';
 import nodeCron from 'node-cron';
 import MarkedSpot from "../models/markedSpots.model.js";
+import oneTimeModel from "../models/one-time.model.js";
 
 const app = express();
 
@@ -31,28 +32,9 @@ nodeCron.schedule("*/5 * * * *", async () => {
         }
       ]
     });
-    await MarkedSpot.updateMany(
-      {
-        $and: [
-          {
-            $or: [
-              { "preCodeOrGestureForComplete.isUserCompleted": false },
-            ]
-          },
-          {
-            $or: [
-              { "preCodeOrGestureForComplete.expectedCompletionDate": { $lt: now } },
-              { expectedCompletionDate: { $lt: now } }
-            ]
-          }
-        ]
-      },
-      {
-        $set: {
-          preCodeOrGestureForComplete: {}
-        }
-      }
-    );
+    await oneTimeModel.deleteMany({
+      expirationDate: { $lt: now }
+    });
     console.log("Old one-time codes deleted successfully");
   } catch (error) {
     console.error("Error deleting old one-time codes:", error);

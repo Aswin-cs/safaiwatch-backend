@@ -18,6 +18,8 @@ import { aiPhotoVerification, getImageFRomCLoudinary } from "../../utils/aiPhoto
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import { JWT_SECRET } from "../../config/envConfig.js";
+import oneTimeModel from "../../models/one-time.model.js";
+import { on } from "events";
 
 /**
  * Helper to get user ID from req.user or JWT token if available
@@ -87,7 +89,7 @@ const parseCoordinates = (coords) => {
  * Mark/Create a new civic spot
  * POST /api/v1/spots
  */
-const aiVerification = async (req, verificationData, savedSpotId, action = "marked") => {
+const aiVerification = async (req, verificationData, savedSpotId, action = "marked", oneTimeRecordId = null) => {
       let fileInput = req.file?.path;
       if (!fileInput && req.file?.buffer) {
             const b64 = Buffer.from(req.file.buffer).toString("base64");
@@ -99,7 +101,7 @@ const aiVerification = async (req, verificationData, savedSpotId, action = "mark
       const userId = req.user?._id;
       (async () => {
             try {
-                  const isvalid = await aiPhotoVerification(fileInput, req.file?.mimetype || "image/jpeg", verificationData, "simulation");
+                  const isvalid = await aiPhotoVerification(fileInput, req.file?.mimetype || "image/jpeg", verificationData, "real");
                   console.log(isvalid, `AI Audit Verification Result (${action})`);
                   const isVerified = Boolean(!isvalid?.isAiOrEdited && !isvalid?.isFraudulent);
                   
@@ -127,7 +129,24 @@ const aiVerification = async (req, verificationData, savedSpotId, action = "mark
                         });
                   }
                   else if(action === "completed" && isVerified) {
-
+                        await newFunction(userId, savedSpotId, oneTimeRecordId, action);
+                  } else if(action === "completed" && !isVerified) {
+                        const failMsg = isvalid?.fraudReason || isvalid?.forensicDetails || "AI verification failed: Photo did not pass authenticity or cleanliness audit.";
+                        if (oneTimeRecordId) {
+                              await oneTimeModel.findByIdAndUpdate(oneTimeRecordId, {
+                                    message: failMsg,
+                                    status: "failed",
+                                    isVerified: false,
+                                    aiAuditResult: isvalid,
+                              });
+                        }
+                        await UserStatus.findOneAndUpdate(
+                              { $or: [{ user: userId }, { userId }], "AssignedSpots._id": savedSpotId },
+                              {
+                                    $set: { "AssignedSpots.$.isPending": false },
+                                    $inc: { pendingCount: -1 }
+                              }
+                        );
                   }
                   
                         (async () => {
@@ -409,6 +428,20 @@ export const getMarkedSpots = async (req, res, next) => {
                   MarkedSpot.countDocuments(query),
             ]);
 
+            // Only attach pending verification data/message to the particular user who submitted it
+            const pendingOneTimesBySpotId = new Map();
+            if (requesterId) {
+                  const userPendingRecords = await oneTimeModel.find({
+                        user: requesterId,
+                        image: { $exists: true, $ne: "" },
+                  });
+                  userPendingRecords.forEach((record) => {
+                        if (record.markspotid) {
+                              pendingOneTimesBySpotId.set(record.markspotid.toString(), record);
+                        }
+                  });
+            }
+
             const sanitizedSpots = spots.map((spotDoc) => {
                   const spotObj = spotDoc.toObject ? spotDoc.toObject() : { ...spotDoc };
                   const markedById = spotObj.markedBy?._id ? spotObj.markedBy._id.toString() : spotObj.markedBy?.toString();
@@ -420,6 +453,22 @@ export const getMarkedSpots = async (req, res, next) => {
                         delete spotObj.isCompletedVerify;
                         delete spotObj.isCompletedVerifyAt;
                   }
+
+                  const spotIdStr = spotObj._id?.toString();
+                  if (requesterId && pendingOneTimesBySpotId.has(spotIdStr)) {
+                        const pendingDoc = pendingOneTimesBySpotId.get(spotIdStr);
+                        const isFailed = pendingDoc.status === "failed";
+                        spotObj.isPendingVerification = !isFailed;
+                        spotObj.verificationStatus = pendingDoc.status || (pendingDoc.isVerified ? "verified" : "pending");
+                        spotObj.pendingVerificationMsg = pendingDoc.message || (isFailed ? "AI verification failed: Photo did not pass verification." : "AI verification in progress for your cleanup submission.");
+                        spotObj.pendingCleanupImage = pendingDoc.image;
+                        spotObj.oneTimeVerificationId = pendingDoc._id;
+                  } else {
+                        spotObj.isPendingVerification = false;
+                        spotObj.verificationStatus = null;
+                        spotObj.oneTimeVerificationId = null;
+                  }
+
                   return spotObj;
             });
 
@@ -471,6 +520,31 @@ export const getMarkedSpot = async (req, res, next) => {
                   delete spotObj.isVerified;
                   delete spotObj.isCompletedVerify;
                   delete spotObj.isCompletedVerifyAt;
+            }
+
+            const spotIdStr = spotObj._id?.toString();
+            if (requesterId) {
+                  const pendingDoc = await oneTimeModel.findOne({
+                        user: requesterId,
+                        markspotid: spotIdStr,
+                        image: { $exists: true, $ne: "" },
+                  });
+                  if (pendingDoc) {
+                        const isFailed = pendingDoc.status === "failed";
+                        spotObj.isPendingVerification = !isFailed;
+                        spotObj.verificationStatus = pendingDoc.status || (pendingDoc.isVerified ? "verified" : "pending");
+                        spotObj.pendingVerificationMsg = pendingDoc.message || (isFailed ? "AI verification failed: Photo did not pass verification." : "AI verification in progress for your cleanup submission.");
+                        spotObj.pendingCleanupImage = pendingDoc.image;
+                        spotObj.oneTimeVerificationId = pendingDoc._id;
+                  } else {
+                        spotObj.isPendingVerification = false;
+                        spotObj.verificationStatus = null;
+                        spotObj.oneTimeVerificationId = null;
+                  }
+            } else {
+                  spotObj.isPendingVerification = false;
+                  spotObj.verificationStatus = null;
+                  spotObj.oneTimeVerificationId = null;
             }
 
             return responseHandler(res, 200, "Spot retrieved successfully", {
@@ -812,7 +886,7 @@ export const assignSpot = async (req, res, next) => {
 export const completeSpot = async (req, res, next) => {
       const session = await mongoose.startSession();
       try {
-            const spotId = req.params.id;
+            const spotId = req.params.id || req.body?.spotId || req.body?.markspotid;
             const userId = req.user?._id;
 
             if (!spotId || !mongoose.Types.ObjectId.isValid(spotId)) {
@@ -852,9 +926,82 @@ export const completeSpot = async (req, res, next) => {
             const completedUploadRes = await handleImageUpload(req, "SafaiWatch_completed_spots");
             const completedImageUrl = typeof completedUploadRes === "string" ? completedUploadRes : (completedUploadRes?.secure_url || completedUploadRes?.url || "");
             const completedImagePublicId = typeof completedUploadRes === "object" ? (completedUploadRes?.public_id || "") : "";
+            const userStatus = await UserStatus.findOneAndUpdate(
+            {
+                  $or: [{ user: userId }, { userId }],
+                  "AssignedSpots._id": spot._id, // MongoDB finds the exact index using its query engine
+            },
+            {
+                  $set: {
+                  "AssignedSpots.$.isPending": true, // '$' refers directly to the matched element
+      },
+            $inc: {
+             pendingCount: 1, // Atomically increments pendingCount in the same operation
+            },
+            },
+            { new: true } // Returns the updated document immediately
+            );
+            
+            if (!userStatus) {
+                  return next(errorHandler(404, "User status not found"));
+            }
 
+            const oneTimeRecord = await oneTimeModel.create({
+                  user: userId,
+                  markspotid: spot._id,
+                  image: completedImageUrl,
+                  imageId: completedImagePublicId
+            });
+
+            // Trigger AI Audit Verification for cleanup resolution
+            const aiData = await aiVerification(req, isVerified, spot._id, "completed", oneTimeRecord.id);
+
+            // Real-time socket event to notify frontend of submitting user
+            try {
+                  const verifyingPayload = {
+                        spotId: spot._id,
+                        userId: userId.toString(),
+                        action: "completed",
+                        status: "verifying",
+                        message: "Cleanup photo uploaded! AI verification in progress...",
+                  };
+                  if (userId) {
+                        getIo().to(`user:${userId}`).to(String(userId)).emit("spot:ai-verifying", verifyingPayload);
+                  }
+                  getIo().emit("spot:ai-verifying", verifyingPayload);
+            } catch (socketErr) {
+                  console.error("Socket emit error for spot:ai-verifying:", socketErr);
+            }
+
+            return responseHandler(res, 200, "Image verification in progress", {
+                  spot: oneTimeRecord,
+                  userStatus,
+                  isPending: true,
+                  message: "Cleanup photo uploaded! AI verification in progress...",
+            });
+            //// we need ai verification for completed image and then we can update the spot with ai verification result
+
+           
+      } catch (error) {
+            if (session.inTransaction()) {
+                  await session.abortTransaction();
+            }
+            await session.endSession();
+            next(error);
+      }
+};
+
+const newFunction = async (userId, spotId, oneTimeRecordId, action) => {
+      const session = await mongoose.startSession();
+      try {
             session.startTransaction();
-
+            const completedImageData = await oneTimeModel.findById(oneTimeRecordId).session(session);
+            const completedImageUrl = completedImageData?.image || "";
+            const completedImagePublicId = completedImageData?.imageId || "";
+            const spot = await MarkedSpot.findById(spotId).session(session);
+            if (!spot) {
+                  throw new Error("Spot not found");
+            }
             spot.isCompleted = true;
             if (completedImageUrl) {
                   spot.completedImage = completedImageUrl;
@@ -867,15 +1014,10 @@ export const completeSpot = async (req, res, next) => {
             });
 
             await spot.save({ session });
-
-            // Trigger AI Audit Verification for cleanup resolution
-            const aiData = await aiVerification(req, isVerified, spot._id, "completed");
-
-            //// we need ai verification for completed image and then we can update the spot with ai verification result
-
-            let userStatus = await UserStatus.findOne({
+             let userStatus = await UserStatus.findOne({
                   $or: [{ user: userId }, { userId }],
             }).session(session);
+            await oneTimeModel.findByIdAndDelete(oneTimeRecordId).session(session);
 
             if (!userStatus) {
                   userStatus = new UserStatus({ user: userId });
@@ -884,7 +1026,7 @@ export const completeSpot = async (req, res, next) => {
             if (!userStatus.currentLocation || !userStatus.currentLocation.type || !userStatus.currentLocation.coordinates?.length) {
                   userStatus.currentLocation = {
                         type: "Point",
-                        coordinates: spot.coordinates || req.user?.geolocation?.coordinates || [77.209, 28.6139],
+                        coordinates: spot.coordinates || [77.209, 28.6139],
                   };
             }
 
@@ -938,7 +1080,7 @@ export const completeSpot = async (req, res, next) => {
                                           postName: `Cleanup at ${spot.address}`,
                                           SpotedUser: spot.markedBy,
                                           CleanedUser: userId,
-                                          description: req.body?.description || spot.description || "Civic spot cleaned up successfully!",
+                                          description: spot.description || "Civic spot cleaned up successfully!",
                                           imageBefore: spot.image,
                                           imageAfter: completedImageUrl,
                                           geolocation: {
@@ -979,17 +1121,17 @@ export const completeSpot = async (req, res, next) => {
             await session.commitTransaction();
             await session.endSession();
 
-            // Calculate rewards, badges, streaks & leaderboard rank in parallel background task (non-blocking)
-            (async () => {
-                  try {
-                        await rewardsCalculating(userId, { markedSpotId: spot._id }, "completed");
-                        await streaksCalculated({ user_id: userId });
-                        await badgesCalculating({ user_id: userId });
-                        await leaderboardRankCalculated({ user_id: userId });
-                  } catch (rewardErr) {
-                        console.error("Background reward calculation error in completeSpot:", rewardErr);
-                  }
-            })();
+            // // Calculate rewards, badges, streaks & leaderboard rank in parallel background task (non-blocking)
+            // (async () => {
+            //       try {
+            //             await rewardsCalculating(userId, { markedSpotId: spot._id }, "completed");
+            //             await streaksCalculated({ user_id: userId });
+            //             await badgesCalculating({ user_id: userId });
+            //             await leaderboardRankCalculated({ user_id: userId });
+            //       } catch (rewardErr) {
+            //             console.error("Background reward calculation error in completeSpot:", rewardErr);
+            //       }
+            // })();
 
             const populatedCompletedSpot = await MarkedSpot.findById(spot._id)
                   .populate("markedBy", "_id username avatar role email")
@@ -1004,20 +1146,14 @@ export const completeSpot = async (req, res, next) => {
                   console.error("Socket emit error in completeSpot:", socketErr);
             }
 
-            return responseHandler(res, 200, "Spot marked as completed successfully", {
-                  spot: populatedCompletedSpot || spot,
-                  newKarmaPoints: userRewards.karmaPoints,
-                  rank: userRewards.rank,
-            });
-      } catch (error) {
-            if (session.inTransaction()) {
-                  await session.abortTransaction();
-            }
-            await session.endSession();
-            next(error);
-      }
-};
+           
 
+      }
+      catch (error) {
+            console.error("Error in newFunction:", error);
+            return error;
+      }
+}
 /**
  * Rate a completed spot
  * PATCH /api/v1/spots/:id/rate
@@ -1055,74 +1191,121 @@ export const rateSpot = async (req, res, next) => {
 export const getRandomGestureVerification = async (req, res, next) => {
       try {
             const userId = req.body?.userId || req.user?._id?.toString() || req.user?.id;
-            const { coordinates } = req.body;
+            const { coordinates, markspotid, spotId } = req.body;
+
             if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
                   return next(errorHandler(400, "Invalid user ID"));
             }
-            if (!coordinates || !Array.isArray(coordinates) || coordinates.length !== 2) {
-                  return next(errorHandler(400, "Invalid coordinates"));
-            }
+
             const isValidUser = await User.findById(userId);
             if (!isValidUser) {
                   return next(errorHandler(404, "User not found"));
             }
-            if (isValidUser.role == "Coordinator") {
-                  return next(errorHandler(400, "Coordinator cannot perform this action"));
-            }
+            
 
-
-            // get the random gesture
             const imageUrl = await getImageFRomCLoudinary();
-
             if (!imageUrl) {
-                  return next(errorHandler(404, "Image not found"));
+                  return next(errorHandler(404, "Gesture image could not be loaded"));
             }
 
             const action = req.body?.action || req.body?.target || "mark";
-            const isCompleteAction = action === "complete";
-            const fieldKey = isCompleteAction ? "preCodeOrGestureForComplete" : "preCodeOrGestureForMark";
+            if (isValidUser.role === "Coordinator" && action != "complete") {
+                  return next(errorHandler(400, "Coordinator cannot perform this action"));
+            }
+            const expirationDate = new Date(Date.now() + 5 * 60 * 1000);
 
-            // Upsert existing uncompleted gesture verification for this user
+            // 1. Action "complete" -> Stores in OneTime model
+            if (action === "complete") {
+                  const targetSpotId = markspotid || spotId || req.body?.markspotid || req.body?.spotId || req.params?.id || req.body?.id || req.query?.markspotid || req.query?.spotId || req.query?.id;
+                  if (!targetSpotId || !mongoose.Types.ObjectId.isValid(targetSpotId)) {
+                        return next(errorHandler(400, "Valid spot ID is required for completion verification"));
+                  }
+
+                  const targetSpot = await MarkedSpot.findById(targetSpotId);
+                  if (!targetSpot) {
+                        return next(errorHandler(404, "Spot not found"));
+                  }
+                  if (targetSpot.isCompleted) {
+                        return next(errorHandler(400, "Spot has already been completed"));
+                  }
+
+                  const oneTimeVerification = await oneTimeModel.findOneAndUpdate(
+                        { user: userId, markspotid: targetSpotId },
+                        {
+                              $set: {
+                                    user: userId,
+                                    markspotid: targetSpotId,
+                                    guestureImage: imageUrl,
+                                    expirationDate,
+                              }
+                        },
+                        { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }
+                  );
+
+                  // Clean up any duplicate pending verifications for this user
+                  await oneTimeModel.deleteMany({
+                        user: userId,
+                        _id: { $ne: oneTimeVerification._id }
+                  });
+
+                  return responseHandler(res, 200, "Random gesture verification generated successfully", {
+                        imageId: oneTimeVerification._id,
+                        verificationId: oneTimeVerification._id,
+                        imageUrl,
+                  });
+            }
+
+            // 2. Action "mark" -> Stores in MarkedSpot under preCodeOrGestureForMark
+            if (!coordinates || !Array.isArray(coordinates) || coordinates.length !== 2) {
+                  return next(errorHandler(400, "Valid coordinates are required"));
+            }
+
             const randomVerification = await MarkedSpot.findOneAndUpdate(
                   {
                         markedBy: userId,
                         $or: [
-                              { [`${fieldKey}.isUserCompleted`]: false },
                               { "preCodeOrGestureForMark.isUserCompleted": false },
-                              { "preCodeOrGestureForComplete.isUserCompleted": false },
                               { isUserCompleted: false },
                         ],
                   },
                   {
                         $set: {
                               markedBy: userId,
-                              [fieldKey]: {
+                              coordinates,
+                              markedAt: new Date(),
+                              expectedCompletionDate: expirationDate,
+                              verificationtype: "gesture",
+                              verificationGesture: imageUrl,
+                              isUserCompleted: false,
+                              preCodeOrGestureForMark: {
                                     isUserCompleted: false,
                                     verificationtype: "gesture",
                                     verificationGesture: imageUrl,
                                     isCodeOrGestureVerified: false,
-                                    expectedCompletionDate: new Date(Date.now() + 5 * 60 * 1000),
+                                    expectedCompletionDate: expirationDate,
                               },
                         }
                   },
-                  { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
+                  { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }
             );
 
             // Clean up any duplicate pending verifications for this user
             await MarkedSpot.deleteMany({
                   markedBy: userId,
                   $or: [
-                        { [`${fieldKey}.isUserCompleted`]: false },
+                        { "preCodeOrGestureForMark.isUserCompleted": false },
+                        { isUserCompleted: false },
                   ],
                   _id: { $ne: randomVerification._id }
             });
 
-            return responseHandler(res, 200, "Random gesture verification sent successfully", {
+            return responseHandler(res, 200, "Random gesture verification generated successfully", {
                   imageId: randomVerification._id,
-                  imageUrl: imageUrl
+                  verificationId: randomVerification._id,
+                  imageUrl,
             });
       } catch (error) {
-            console.log(error, "error");
+            console.error("Error in getRandomGestureVerification:", error);
             next(error);
       }
 };
@@ -1130,125 +1313,130 @@ export const getRandomGestureVerification = async (req, res, next) => {
 export const getRandomCodeVerification = async (req, res, next) => {
       try {
             const userId = req.body?.userId || req.user?._id?.toString() || req.user?.id;
-            const { coordinates } = req.body;
+            const { coordinates, markspotid, spotId } = req.body;
+
             if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
                   return next(errorHandler(400, "Invalid user ID"));
             }
-            if (!coordinates || !Array.isArray(coordinates) || coordinates.length !== 2) {
-                  return next(errorHandler(400, "Invalid coordinates"));
-            }
+
             const isValidUser = await User.findById(userId);
             if (!isValidUser) {
                   return next(errorHandler(404, "User not found"));
             }
-            if (isValidUser.role == "Coordinator") {
-                  return next(errorHandler(400, "Coordinator cannot perform this action"));
-            }
-
-            // get the random code
             const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
             const randomCode = Array.from(crypto.randomBytes(4), (b) => chars[b % chars.length]).join("");
-
             const action = req.body?.action || req.body?.target || "mark";
-            const isCompleteAction = action === "complete";
-            const fieldKey = isCompleteAction ? "preCodeOrGestureForComplete" : "preCodeOrGestureForMark";
+            if (isValidUser.role === "Coordinator" && action != "complete") {
+                  return next(errorHandler(400, "Coordinator cannot perform this action"));
+            }
+            const expirationDate = new Date(Date.now() + 5 * 60 * 1000);
 
-            // Upsert existing uncompleted code verification for this user
+            // 1. Action "complete" -> Stores in OneTime model
+            if (action === "complete") {
+                  const targetSpotId = markspotid || spotId || req.body?.markspotid || req.body?.spotId || req.params?.id || req.body?.id || req.query?.markspotid || req.query?.spotId || req.query?.id;
+                  if (!targetSpotId || !mongoose.Types.ObjectId.isValid(targetSpotId)) {
+                        return next(errorHandler(400, "Valid spot ID is required for completion verification"));
+                  }
+
+                  const targetSpot = await MarkedSpot.findById(targetSpotId);
+                  if (!targetSpot) {
+                        return next(errorHandler(404, "Spot not found"));
+                  }
+                  if (targetSpot.isCompleted) {
+                        return next(errorHandler(400, "Spot has already been completed"));
+                  }
+
+                  const oneTimeVerification = await oneTimeModel.findOneAndUpdate(
+                        { user: userId, markspotid: targetSpotId },
+                        {
+                              $set: {
+                                    user: userId,
+                                    markspotid: targetSpotId,
+                                    code: randomCode,
+                                    expirationDate,
+                              }
+                        },
+                        { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }
+                  );
+
+                  // Clean up any duplicate pending verifications for this user
+                  await oneTimeModel.deleteMany({
+                        user: userId,
+                        _id: { $ne: oneTimeVerification._id }
+                  });
+
+                  return responseHandler(res, 200, "Random code verification generated successfully", {
+                        verificationId: oneTimeVerification._id,
+                        code: randomCode,
+                  });
+            }
+
+            // 2. Action "mark" -> Stores in MarkedSpot under preCodeOrGestureForMark
+            if (!coordinates || !Array.isArray(coordinates) || coordinates.length !== 2) {
+                  return next(errorHandler(400, "Valid coordinates are required"));
+            }
+
             const randomVerification = await MarkedSpot.findOneAndUpdate(
                   {
                         markedBy: userId,
                         $or: [
-                              { [`${fieldKey}.isUserCompleted`]: false },
+                              { "preCodeOrGestureForMark.isUserCompleted": false },
+                              { isUserCompleted: false },
                         ],
                   },
                   {
                         $set: {
                               markedBy: userId,
-                              [fieldKey]: {
+                              coordinates,
+                              markedAt: new Date(),
+                              preCodeOrGestureForMark: {
                                     isUserCompleted: false,
                                     verificationtype: "code",
                                     verificationCode: randomCode,
                                     isCodeOrGestureVerified: false,
-                                    expectedCompletionDate: new Date(Date.now() + 5 * 60 * 1000),
+                                    expectedCompletionDate: expirationDate,
                               },
                         }
                   },
-                  { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
+                  { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }
             );
 
             // Clean up any duplicate pending verifications for this user
             await MarkedSpot.deleteMany({
                   markedBy: userId,
                   $or: [
-                        { [`${fieldKey}.isUserCompleted`]: false },
                         { "preCodeOrGestureForMark.isUserCompleted": false },
-                        { "preCodeOrGestureForComplete.isUserCompleted": false },
                         { isUserCompleted: false },
                   ],
                   _id: { $ne: randomVerification._id }
             });
 
-
-            return responseHandler(res, 200, "Random code verification sent successfully", {
+            return responseHandler(res, 200, "Random code verification generated successfully", {
                   verificationId: randomVerification._id,
                   code: randomCode,
             });
       } catch (error) {
-            console.log(error, "error");
+            console.error("Error in getRandomCodeVerification:", error);
             next(error);
       }
-}
+};
 
-export const preImageOrCodeVerification = async (req, target = "mark") => {
+const preImageOrCodeVerification = async (req, target = "mark") => {
       const verificationId =
             req.body?.verificationId ||
             req.body?.gestureVerificationId ||
             req.body?.gestureId ||
             req.body?.codeVerificationId ||
-            req.body?.codeId;
+            req.body?.codeId ||
+            (target === "mark" ? req.params?.id : undefined);
 
       if (!verificationId || !mongoose.Types.ObjectId.isValid(verificationId)) {
             throw errorHandler(400, "Valid verification ID is required");
       }
 
-      // Check validity of verificationId
-      const oneTime = await MarkedSpot.findById(verificationId);
-      if (!oneTime) {
-            throw errorHandler(404, "Invalid or expired verification ID");
-      }
-
-      const isCompleteAction =
-            target === "complete" ||
-            req.body?.action === "complete" ||
-            req.body?.target === "complete" ||
-            (!oneTime.preCodeOrGestureForMark?.verificationtype && Boolean(oneTime.preCodeOrGestureForComplete?.verificationtype));
-
-      const fieldKey = isCompleteAction ? "preCodeOrGestureForComplete" : "preCodeOrGestureForMark";
-      const targetData = oneTime[fieldKey] || {};
-      const isVerified = targetData.isCodeOrGestureVerified ?? oneTime.isCodeOrGestureVerified;
-      const isCompleted = targetData.isUserCompleted ?? oneTime.isUserCompleted;
-      const expiry = targetData.expectedCompletionDate || oneTime.expectedCompletionDate;
-
-      if (isVerified) {
-            throw errorHandler(400, "Verification code/gesture has already been verified");
-      }
-      if (isCompleted) {
-            throw errorHandler(400, "Verification code/gesture has already been used");
-      }
-      // Check if verification has expired
-      if (expiry && new Date(expiry).getTime() < Date.now()) {
-            throw errorHandler(400, "Verification code/gesture has expired");
-      }
-      
-
       const userId = req.user?._id?.toString() || req.user?.id || "";
       if (!userId) {
             throw errorHandler(401, "Unauthorized");
-      }
-
-      // Check user ownership
-      if (oneTime.markedBy && oneTime.markedBy.toString() !== userId) {
-            throw errorHandler(403, "Verification does not belong to this user");
       }
 
       const isValidUser = await User.findById(userId);
@@ -1256,29 +1444,152 @@ export const preImageOrCodeVerification = async (req, target = "mark") => {
             throw errorHandler(404, "User not found");
       }
 
-      if (isValidUser.role === "Coordinator") {
+      if (isValidUser.role === "Coordinator" && target !== "complete") {
             throw errorHandler(400, "Coordinator cannot perform this action");
       }
 
-      // Mark verification as verified and consumed
+      // 1. Completion Action: Verify against OneTime model
+      if (target === "complete" || req.body?.action == "complete") {
+            const oneTimeDoc = await oneTimeModel.findById(verificationId);
+            if (!oneTimeDoc) {
+                  throw errorHandler(404, "Invalid or expired completion verification ID");
+            }
+
+            if (oneTimeDoc.expirationDate && new Date(oneTimeDoc.expirationDate).getTime() < Date.now()) {
+                  await oneTimeModel.findByIdAndDelete(verificationId);
+                  throw errorHandler(400, "Verification code/gesture has expired");
+            }
+
+            if (oneTimeDoc.user && oneTimeDoc.user.toString() !== userId) {
+                  throw errorHandler(403, "Verification does not belong to this user");
+            }
+
+            // Clean up any duplicate pending verifications for this user
+            await oneTimeModel.deleteMany({
+                  user: userId,
+                  _id: { $ne: oneTimeDoc._id }
+            });
+
+            const vType = oneTimeDoc.code ? "code" : "gesture";
+            const vVal = oneTimeDoc.code || oneTimeDoc.guestureImage;
+
+            return {
+                  data: vVal,
+                  type: vType,
+                  id: oneTimeDoc.markspotid || oneTimeDoc._id,
+                  verificationId: oneTimeDoc._id,
+            };
+      }
+
+      // 2. Mark Action: Verify against MarkedSpot preCodeOrGestureForMark
+      const markedSpot = await MarkedSpot.findById(verificationId);
+      if (!markedSpot) {
+            throw errorHandler(404, "Invalid or expired verification spot ID");
+      }
+
+      const markData = markedSpot.preCodeOrGestureForMark || {};
+      const isVerified = markData.isCodeOrGestureVerified ?? markedSpot.isCodeOrGestureVerified;
+      const isCompleted = markData.isUserCompleted ?? markedSpot.isUserCompleted;
+      const expiry = markData.expectedCompletionDate || markedSpot.expectedCompletionDate;
+
+      if (isVerified) {
+            throw errorHandler(400, "Verification code/gesture has already been verified");
+      }
+      if (isCompleted) {
+            throw errorHandler(400, "Verification code/gesture has already been used");
+      }
+      if (expiry && new Date(expiry).getTime() < Date.now()) {
+            throw errorHandler(400, "Verification code/gesture has expired");
+      }
+
+      if (markedSpot.markedBy && markedSpot.markedBy.toString() !== userId) {
+            throw errorHandler(403, "Verification does not belong to this user");
+      }
+
+      // Mark as verified and consumed
       await MarkedSpot.findOneAndUpdate(
             { _id: verificationId, markedBy: userId },
             {
-                  [`${fieldKey}.isUserCompleted`]: true,
-                  [`${fieldKey}.isCodeOrGestureVerified`]: true,
-                  [`${fieldKey}.expectedCompletionDate`]: new Date(),
+                  "preCodeOrGestureForMark.isUserCompleted": true,
+                  "preCodeOrGestureForMark.isCodeOrGestureVerified": true,
+                  "preCodeOrGestureForMark.expectedCompletionDate": new Date(),
             }
       );
 
-      const vType = targetData.verificationtype || oneTime.verificationtype;
-      const vVal = vType === "gesture" 
-            ? (targetData.verificationGesture || oneTime.verificationGesture) 
-            : (targetData.verificationCode || oneTime.verificationCode);
+      const vType = markData.verificationtype || markedSpot.verificationtype;
+      const vVal = vType === "gesture"
+            ? (markData.verificationGesture || markedSpot.verificationGesture)
+            : (markData.verificationCode || markedSpot.verificationCode);
 
-      return { data: vVal, type: vType, id: oneTime._id };
+      return {
+            data: vVal,
+            type: vType,
+            id: markedSpot._id,
+      };
 };
 
-export const preImageOrCodeVerificationForComplete = async (req) => {
-      return preImageOrCodeVerification(req, "complete");
+/**
+ * Delete one-time verification document (e.g. after AI verification failure)
+ * and revert spot isPending status so the user can re-upload
+ * DELETE /api/v1/spots/:id/one-time
+ */
+export const deleteOneTimeVerification = async (req, res, next) => {
+      try {
+            const id = req.params.id;
+            const userId = req.user?._id?.toString() || req.user?.id;
+
+            if (!userId) {
+                  return next(errorHandler(401, "Unauthorized"));
+            }
+
+            if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+                  return next(errorHandler(400, "Valid Spot ID or Verification ID is required"));
+            }
+
+            // Find oneTime record by its own _id OR by markspotid belonging to this user
+            const record = await oneTimeModel.findOne({
+                  $or: [
+                        { _id: id, user: userId },
+                        { markspotid: id, user: userId },
+                  ],
+            });
+
+            if (!record) {
+                  return next(errorHandler(404, "Verification record not found"));
+            }
+
+            const spotId = record.markspotid;
+
+            // Delete the one-time record
+            await oneTimeModel.findByIdAndDelete(record._id);
+
+            // Set isPending = false in UserStatus for this spot
+            if (spotId) {
+                  const userStatus = await UserStatus.findOne({
+                        $or: [{ user: userId }, { userId }],
+                  });
+                  if (userStatus) {
+                        const assignedSpot = userStatus.AssignedSpots?.find(
+                              (s) => s._id && s._id.toString() === spotId.toString()
+                        );
+                        if (assignedSpot) {
+                              assignedSpot.isPending = false;
+                        }
+                        if (userStatus.pendingCount && userStatus.pendingCount > 0) {
+                              userStatus.pendingCount -= 1;
+                        }
+                        await userStatus.save();
+                  }
+            }
+
+            return responseHandler(res, 200, "Verification document deleted successfully. You can now upload a new cleanup photo.", {
+                  spotId,
+                  oneTimeVerificationId: record._id,
+            });
+      } catch (error) {
+            next(error);
+      }
 };
+
+
 
