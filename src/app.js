@@ -41,9 +41,23 @@ nodeCron.schedule("*/5 * * * *", async () => {
   }
 });
 
+const cleanFrontendEnv = process.env.FRONTEND_URL ? process.env.FRONTEND_URL.replace(/\/$/, '') : null;
+
 app.use(
   cors({
-    origin: [process.env.FRONTEND_URL, 'http://localhost:3000', 'http://127.0.0.1:3000'].filter(Boolean),
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      const cleanOrigin = origin.replace(/\/$/, '');
+      if (
+        cleanOrigin === cleanFrontendEnv ||
+        cleanOrigin === 'http://localhost:3000' ||
+        cleanOrigin === 'http://127.0.0.1:3000' ||
+        cleanOrigin.endsWith('.vercel.app')
+      ) {
+        return callback(null, true);
+      }
+      return callback(null, true);
+    },
     credentials: true,
   })
 );

@@ -3,9 +3,22 @@ import { FRONTEND_URL } from "./envConfig.js";
 
 let io;
 const initialize = async (httpServer) => {
+      const cleanFrontendUrl = FRONTEND_URL ? FRONTEND_URL.replace(/\/$/, '') : null;
       io = new Server(httpServer, {
             cors: {
-                  origin: FRONTEND_URL,
+                  origin: (origin, callback) => {
+                        if (!origin) return callback(null, true);
+                        const cleanOrigin = origin.replace(/\/$/, '');
+                        if (
+                              cleanOrigin === cleanFrontendUrl ||
+                              cleanOrigin === 'http://localhost:3000' ||
+                              cleanOrigin === 'http://127.0.0.1:3000' ||
+                              cleanOrigin.endsWith('.vercel.app')
+                        ) {
+                              return callback(null, true);
+                        }
+                        return callback(null, true);
+                  },
                   methods: ["GET", "POST"],
                   credentials: true,
             },

@@ -5,6 +5,7 @@
   "main": "serverStart.js",
   "type": "module",
   "scripts": {
+    "start": "node serverStart.js",
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "nodemon serverStart.js"
   },
