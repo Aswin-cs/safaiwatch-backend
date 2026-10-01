@@ -91,14 +91,29 @@ export const getMyProfile = async (req, res, next) => {
                   return next(errorHandler(404, "User not found"));
             }
 
-            const [userRewards, userStatus, dbMarkedSpots, dbCompletedSpots] = await Promise.all([
+            const [userRewards, userStatus, dbMarkedSpots, dbCompletedSpots, dbAssignedSpots] = await Promise.all([
                   UserRewards.findOne({ $or: [{ user: userId }, { userId }] }),
                   UserStatus.findOne({ $or: [{ user: userId }, { userId }] })
                         .populate({ path: "MarkedSpots._id", model: "MarkedSpot" })
                         .populate({ path: "AssignedSpots._id", model: "MarkedSpot" })
                         .populate({ path: "CompletedSpots._id", model: "MarkedSpot" }),
-                  MarkedSpot.find({ markedBy: userId, isUserCompleted: true }).sort({ markedAt: -1 }),
-                  MarkedSpot.find({ "isCompletedBy.completedBy": userId }).sort({ markedAt: -1 }),
+                  MarkedSpot.find({
+                        markedBy: userId,
+                        "preCodeOrGestureForMark.isUserCompleted": { $ne: false },
+                  })
+                        .populate("markedBy", "_id username avatar role")
+                        .populate("isAssignedBy.assignedBy", "_id username avatar role")
+                        .populate("isCompletedBy.completedBy", "_id username avatar role")
+                        .sort({ markedAt: -1, createdAt: -1 }),
+                  MarkedSpot.find({ "isCompletedBy.completedBy": userId })
+                        .populate("markedBy", "_id username avatar role")
+                        .populate("isAssignedBy.assignedBy", "_id username avatar role")
+                        .populate("isCompletedBy.completedBy", "_id username avatar role")
+                        .sort({ markedAt: -1, createdAt: -1 }),
+                  MarkedSpot.find({ "isAssignedBy.assignedBy": userId, isCompleted: false })
+                        .populate("markedBy", "_id username avatar role")
+                        .populate("isAssignedBy.assignedBy", "_id username avatar role")
+                        .sort({ markedAt: -1, createdAt: -1 }),
             ]);
 
             const userRole = (user.role || "Civilian").toLowerCase();
@@ -109,12 +124,16 @@ export const getMyProfile = async (req, res, next) => {
 
             const markedMap = new Map();
             dbMarkedSpots.forEach((s) => {
-                  if (s && s._id && s.isUserCompleted === true) markedMap.set(String(s._id), s);
+                  if (s && s._id) markedMap.set(String(s._id), s);
             });
             statusMarked.forEach((item) => {
-                  const s = item._id || item;
-                  if (s && s._id && s.isUserCompleted === true && !markedMap.has(String(s._id))) {
-                        markedMap.set(String(s._id), s);
+                  let s = item;
+                  if (item._id && typeof item._id === "object" && (item._id.address || item._id.description || item._id._id)) {
+                        s = item._id;
+                  }
+                  const spotIdStr = s._id ? String(s._id) : (typeof s.id === "string" ? s.id : null);
+                  if (spotIdStr && s.preCodeOrGestureForMark?.isUserCompleted !== false && !markedMap.has(spotIdStr)) {
+                        markedMap.set(spotIdStr, s);
                   }
             });
             const allMarkedSpots = Array.from(markedMap.values());
@@ -124,12 +143,32 @@ export const getMyProfile = async (req, res, next) => {
                   if (s && s._id) completedMap.set(String(s._id), s);
             });
             statusCompleted.forEach((item) => {
-                  const s = item._id || item;
-                  if (s && s._id && !completedMap.has(String(s._id))) {
-                        completedMap.set(String(s._id), s);
+                  let s = item;
+                  if (item._id && typeof item._id === "object" && (item._id.address || item._id.description || item._id._id)) {
+                        s = item._id;
+                  }
+                  const spotIdStr = s._id ? String(s._id) : (typeof s.id === "string" ? s.id : null);
+                  if (spotIdStr && !completedMap.has(spotIdStr)) {
+                        completedMap.set(spotIdStr, s);
                   }
             });
             const allCompletedSpots = Array.from(completedMap.values());
+
+            const assignedMap = new Map();
+            dbAssignedSpots.forEach((s) => {
+                  if (s && s._id) assignedMap.set(String(s._id), s);
+            });
+            assignedSpots.forEach((item) => {
+                  let s = item;
+                  if (item._id && typeof item._id === "object" && (item._id.address || item._id.description || item._id._id)) {
+                        s = item._id;
+                  }
+                  const spotIdStr = s._id ? String(s._id) : (typeof s.id === "string" ? s.id : null);
+                  if (spotIdStr && !assignedMap.has(spotIdStr)) {
+                        assignedMap.set(spotIdStr, s);
+                  }
+            });
+            const allAssignedSpots = Array.from(assignedMap.values());
 
             const completedCaseItems = allCompletedSpots.map((s, i) => {
                   const spotIdStr = s._id ? String(s._id) : `completed-${i}`;
@@ -154,7 +193,7 @@ export const getMyProfile = async (req, res, next) => {
                   };
             });
 
-            const assignedCaseItems = assignedSpots.map((item, i) => {
+            const assignedCaseItems = allAssignedSpots.map((item, i) => {
                   let s = item;
                   if (item._id && typeof item._id === "object" && (item._id.address || item._id.description || item._id._id)) {
                         s = item._id;
@@ -172,7 +211,7 @@ export const getMyProfile = async (req, res, next) => {
                         markedBy: s.markedBy?.username || s.markedBy?.name || "Civilian Reporter",
                         assignedTo: s.isAssignedBy?.[s.isAssignedBy.length - 1]?.assignedBy?.username || s.isAssignedBy?.[s.isAssignedBy.length - 1]?.assignedBy?.name || "Ward Ranger",
                         markedAt: s.markedAt || s.createdAt,
-                        assignedAt: item.assignedAt || s.updatedAt,
+                        assignedAt: s.assignedAt || item.assignedAt || s.updatedAt,
                         critical: s.critcal || s.critical || "High",
                         description: s.description || s.address,
                   };
@@ -271,7 +310,10 @@ export const getMyProfile = async (req, res, next) => {
                   user: {
                         _id: user._id,
                         username: user.username,
+                        name: user.certificatePreferences?.displayName || user.username,
+                        displayName: user.certificatePreferences?.displayName || user.username,
                         email: user.email,
+                        avatar: user.avatar,
                         avatarUrl: typeof user.avatar === "string" ? user.avatar : user.avatar?.url || "",
                         role: user.role,
                         address: user.address,
@@ -392,14 +434,29 @@ export const getProfileByUsername = async (req, res, next) => {
 
             const userId = user._id;
 
-            const [userRewards, userStatus, dbMarkedSpots, dbCompletedSpots] = await Promise.all([
+            const [userRewards, userStatus, dbMarkedSpots, dbCompletedSpots, dbAssignedSpots] = await Promise.all([
                   UserRewards.findOne({ $or: [{ user: userId }, { userId }] }),
                   UserStatus.findOne({ $or: [{ user: userId }, { userId }] })
                         .populate({ path: "MarkedSpots._id", model: "MarkedSpot" })
                         .populate({ path: "AssignedSpots._id", model: "MarkedSpot" })
                         .populate({ path: "CompletedSpots._id", model: "MarkedSpot" }),
-                  MarkedSpot.find({ markedBy: userId, isUserCompleted: true }).sort({ markedAt: -1 }),
-                  MarkedSpot.find({ "isCompletedBy.completedBy": userId }).sort({ markedAt: -1 }),
+                  MarkedSpot.find({
+                        markedBy: userId,
+                        "preCodeOrGestureForMark.isUserCompleted": { $ne: false },
+                  })
+                        .populate("markedBy", "_id username avatar role")
+                        .populate("isAssignedBy.assignedBy", "_id username avatar role")
+                        .populate("isCompletedBy.completedBy", "_id username avatar role")
+                        .sort({ markedAt: -1, createdAt: -1 }),
+                  MarkedSpot.find({ "isCompletedBy.completedBy": userId })
+                        .populate("markedBy", "_id username avatar role")
+                        .populate("isAssignedBy.assignedBy", "_id username avatar role")
+                        .populate("isCompletedBy.completedBy", "_id username avatar role")
+                        .sort({ markedAt: -1, createdAt: -1 }),
+                  MarkedSpot.find({ "isAssignedBy.assignedBy": userId, isCompleted: false })
+                        .populate("markedBy", "_id username avatar role")
+                        .populate("isAssignedBy.assignedBy", "_id username avatar role")
+                        .sort({ markedAt: -1, createdAt: -1 }),
             ]);
 
             const statusMarked = Array.isArray(userStatus?.MarkedSpots) ? userStatus.MarkedSpots : [];
@@ -408,7 +465,7 @@ export const getProfileByUsername = async (req, res, next) => {
 
             const markedMap = new Map();
             dbMarkedSpots.forEach((s) => {
-                  if (s && s._id && s.isUserCompleted === true) markedMap.set(String(s._id), s);
+                  if (s && s._id) markedMap.set(String(s._id), s);
             });
             statusMarked.forEach((item) => {
                   let s = item;
@@ -416,7 +473,7 @@ export const getProfileByUsername = async (req, res, next) => {
                         s = item._id;
                   }
                   const spotIdStr = s._id ? String(s._id) : (typeof s.id === "string" ? s.id : null);
-                  if (spotIdStr && s.isUserCompleted === true && !markedMap.has(spotIdStr)) {
+                  if (spotIdStr && s.preCodeOrGestureForMark?.isUserCompleted !== false && !markedMap.has(spotIdStr)) {
                         markedMap.set(spotIdStr, s);
                   }
             });
@@ -437,6 +494,22 @@ export const getProfileByUsername = async (req, res, next) => {
                   }
             });
             const allCompletedSpots = Array.from(completedMap.values());
+
+            const assignedMap = new Map();
+            dbAssignedSpots.forEach((s) => {
+                  if (s && s._id) assignedMap.set(String(s._id), s);
+            });
+            assignedSpots.forEach((item) => {
+                  let s = item;
+                  if (item._id && typeof item._id === "object" && (item._id.address || item._id.description || item._id._id)) {
+                        s = item._id;
+                  }
+                  const spotIdStr = s._id ? String(s._id) : (typeof s.id === "string" ? s.id : null);
+                  if (spotIdStr && !assignedMap.has(spotIdStr)) {
+                        assignedMap.set(spotIdStr, s);
+                  }
+            });
+            const allAssignedSpots = Array.from(assignedMap.values());
 
             const userRole = (user.role || "Civilian").toLowerCase();
 
@@ -465,7 +538,7 @@ export const getProfileByUsername = async (req, res, next) => {
 
             const completedSpotIds = new Set(allCompletedSpots.map((s) => String(s._id || s.id)));
 
-            const assignedCaseItems = assignedSpots
+            const assignedCaseItems = allAssignedSpots
                   .filter((item) => {
                         let s = item;
                         if (item._id && typeof item._id === "object" && (item._id.address || item._id.description || item._id._id)) {
@@ -557,12 +630,21 @@ export const getProfileByUsername = async (req, res, next) => {
             return responseHandler(res, 200, "User Profile Info", {
                   user: {
                         _id: user._id,
-                        name: user.name,
-                        role: user.role,
                         username: user.username,
-                        avatar: typeof user.avatar === "string" ? user.avatar : user.avatar?.url || "",
+                        name: user.certificatePreferences?.displayName || user.username,
+                        displayName: user.certificatePreferences?.displayName || user.username,
+                        email: user.email,
+                        role: user.role,
+                        avatar: user.avatar,
+                        avatarUrl: typeof user.avatar === "string" ? user.avatar : user.avatar?.url || "",
                         address: user.address,
                         pincode: user.pincode,
+                        geolocation: user.geolocation,
+                        certificatePreferences: user.certificatePreferences,
+                        accountActive: user.accountActive,
+                        isVerified: user.isVerified,
+                        isProfileCompleted: user.isProfileCompleted,
+                        lastActiveAt: user.lastActiveAt,
                   },
                   userRewards: {
                         karmaBalance: userRewards?.karmaPoints ?? 0,
@@ -638,9 +720,24 @@ export const getUserHistory = async (req, res, next) => {
                   });
 
             // Query MarkedSpots and Posts directly from DB
-            const [dbMarkedSpots, dbCompletedSpots, dbLinkedPosts] = await Promise.all([
-                  MarkedSpot.find({ markedBy: userId, isUserCompleted: true }).sort({ markedAt: -1 }),
-                  MarkedSpot.find({ "isCompletedBy.completedBy": userId }).sort({ markedAt: -1 }),
+            const [dbMarkedSpots, dbCompletedSpots, dbAssignedSpots, dbLinkedPosts] = await Promise.all([
+                  MarkedSpot.find({
+                        markedBy: userId,
+                        "preCodeOrGestureForMark.isUserCompleted": { $ne: false },
+                  })
+                        .populate("markedBy", "_id username avatar role")
+                        .populate("isAssignedBy.assignedBy", "_id username avatar role")
+                        .populate("isCompletedBy.completedBy", "_id username avatar role")
+                        .sort({ markedAt: -1, createdAt: -1 }),
+                  MarkedSpot.find({ "isCompletedBy.completedBy": userId })
+                        .populate("markedBy", "_id username avatar role")
+                        .populate("isAssignedBy.assignedBy", "_id username avatar role")
+                        .populate("isCompletedBy.completedBy", "_id username avatar role")
+                        .sort({ markedAt: -1, createdAt: -1 }),
+                  MarkedSpot.find({ "isAssignedBy.assignedBy": userId, isCompleted: false })
+                        .populate("markedBy", "_id username avatar role")
+                        .populate("isAssignedBy.assignedBy", "_id username avatar role")
+                        .sort({ markedAt: -1, createdAt: -1 }),
                   Post.find({
                         $or: [{ SpotedUser: userId }, { CleanedUser: userId }],
                   })
@@ -653,12 +750,16 @@ export const getUserHistory = async (req, res, next) => {
             const statusMarked = Array.isArray(userStatus?.MarkedSpots) ? userStatus.MarkedSpots : [];
             const markedMap = new Map();
             dbMarkedSpots.forEach((s) => {
-                  if (s && s._id && s.isUserCompleted === true) markedMap.set(String(s._id), s);
+                  if (s && s._id) markedMap.set(String(s._id), s);
             });
             statusMarked.forEach((item) => {
-                  const s = item._id || item;
-                  if (s && s._id && s.isUserCompleted === true && !markedMap.has(String(s._id))) {
-                        markedMap.set(String(s._id), s);
+                  let s = item;
+                  if (item._id && typeof item._id === "object" && (item._id.address || item._id.description || item._id._id)) {
+                        s = item._id;
+                  }
+                  const spotIdStr = s._id ? String(s._id) : (typeof s.id === "string" ? s.id : null);
+                  if (spotIdStr && s.preCodeOrGestureForMark?.isUserCompleted !== false && !markedMap.has(spotIdStr)) {
+                        markedMap.set(spotIdStr, s);
                   }
             });
             const markedSpots = Array.from(markedMap.values()).map((s) => ({
@@ -694,9 +795,13 @@ export const getUserHistory = async (req, res, next) => {
                   if (s && s._id) completedMap.set(String(s._id), s);
             });
             statusCompleted.forEach((item) => {
-                  const s = item._id || item;
-                  if (s && s._id && !completedMap.has(String(s._id))) {
-                        completedMap.set(String(s._id), s);
+                  let s = item;
+                  if (item._id && typeof item._id === "object" && (item._id.address || item._id.description || item._id._id)) {
+                        s = item._id;
+                  }
+                  const spotIdStr = s._id ? String(s._id) : (typeof s.id === "string" ? s.id : null);
+                  if (spotIdStr && !completedMap.has(spotIdStr)) {
+                        completedMap.set(spotIdStr, s);
                   }
             });
             const completedSpots = Array.from(completedMap.values()).map((s) => ({
@@ -713,31 +818,47 @@ export const getUserHistory = async (req, res, next) => {
                   details: {
                         critical: s.critcal || s.critical || "Medium",
                         description: s.description || s.address,
-                        completedBy: user.username,
+                        completedBy: s.isCompletedBy?.[s.isCompletedBy.length - 1]?.completedBy?.username || user.username,
                   },
             }));
 
             // Combine & format AssignedSpots
             const assignedSpotsList = Array.isArray(userStatus?.AssignedSpots) ? userStatus.AssignedSpots : [];
-            const assignedSpots = assignedSpotsList.map((item) => {
-                  const s = item._id || item;
-                  return {
-                        id: `${String(s._id || item._id)}-assigned`,
-                        type: "assigned",
-                        category: "Assigned Spot",
-                        title: s.description || s.address || "Assigned Civic Cleanup",
-                        location: s.address || "Assigned Ward Spot",
-                        image: s.image || "https://images.unsplash.com/photo-1604186837056-8e7c286756f2?w=500&auto=format&fit=crop&q=80",
-                        imageAfter: s.completedImage || s.imageAfter,
-                        isCompleted: Boolean(s.isCompleted),
-                        status: s.isCompleted ? "Completed" : "In Progress",
-                        date: item.assignedAt || s.updatedAt || s.createdAt,
-                        details: {
-                              critical: s.critcal || s.critical || "High",
-                              description: s.description || s.address,
-                        },
-                  };
+            const assignedMap = new Map();
+            dbAssignedSpots.forEach((s) => {
+                  if (s && s._id) assignedMap.set(String(s._id), s);
             });
+            assignedSpotsList.forEach((item) => {
+                  let s = item;
+                  if (item._id && typeof item._id === "object" && (item._id.address || item._id.description || item._id._id)) {
+                        s = item._id;
+                  }
+                  const spotIdStr = s._id ? String(s._id) : (typeof s.id === "string" ? s.id : null);
+                  if (spotIdStr && !assignedMap.has(spotIdStr)) {
+                        assignedMap.set(spotIdStr, {
+                              ...s,
+                              assignedAt: item.assignedAt || s.assignedAt || s.createdAt,
+                              isPending: item.isPending ?? s.isPending ?? false,
+                        });
+                  }
+            });
+            const assignedSpots = Array.from(assignedMap.values()).map((s, idx) => ({
+                  id: `${String(s._id || `assigned-${idx}`)}-assigned`,
+                  type: "assigned",
+                  category: "Assigned Spot",
+                  title: s.description || s.address || "Assigned Civic Cleanup",
+                  location: s.address || "Assigned Ward Spot",
+                  image: s.image || "https://images.unsplash.com/photo-1604186837056-8e7c286756f2?w=500&auto=format&fit=crop&q=80",
+                  imageAfter: s.completedImage || s.imageAfter,
+                  isCompleted: Boolean(s.isCompleted),
+                  status: s.isCompleted ? "Completed" : "In Progress",
+                  date: s.assignedAt || s.updatedAt || s.createdAt,
+                  details: {
+                        critical: s.critcal || s.critical || "High",
+                        description: s.description || s.address,
+                        assignedTo: s.isAssignedBy?.[s.isAssignedBy.length - 1]?.assignedBy?.username || user.username,
+                  },
+            }));
 
             // Format Liked Posts
             const rawLiked = Array.isArray(userStatus?.userLikePosts) ? userStatus.userLikePosts : [];
@@ -808,8 +929,20 @@ export const getUserHistory = async (req, res, next) => {
                   user: {
                         _id: user._id,
                         username: user.username,
-                        name: user.name,
+                        name: user.certificatePreferences?.displayName || user.username,
+                        displayName: user.certificatePreferences?.displayName || user.username,
+                        email: user.email,
                         role: user.role,
+                        avatar: user.avatar,
+                        avatarUrl: typeof user.avatar === "string" ? user.avatar : user.avatar?.url || "",
+                        address: user.address,
+                        pincode: user.pincode,
+                        geolocation: user.geolocation,
+                        certificatePreferences: user.certificatePreferences,
+                        accountActive: user.accountActive,
+                        isVerified: user.isVerified,
+                        isProfileCompleted: user.isProfileCompleted,
+                        lastActiveAt: user.lastActiveAt,
                   },
                   history: {
                         markedSpots,

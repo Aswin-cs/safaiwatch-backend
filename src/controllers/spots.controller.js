@@ -106,26 +106,29 @@ const aiVerification = async (req, verificationData, savedSpotId, action = "mark
                   const isVerified = Boolean(!isvalid?.isAiOrEdited && !isvalid?.isFraudulent);
                   
                   if (savedSpotId && isvalid) {
-                        if(action === "marked" && isVerified) {
+                        const aiVerifiedData = {
+                              isAiOrEdited: Boolean(isvalid?.isAiOrEdited),
+                              forensicConfidence: Number(isvalid?.forensicConfidence || 0),
+                              detectedManipulationType: isvalid?.detectedManipulationType || (isvalid?.isAiOrEdited ? "AI_GENERATED" : "AUTHENTIC_PHOTO"),
+                              forensicDetails: isvalid?.forensicDetails || isvalid?.summary || "",
+                              gestureMatched: Boolean(isvalid?.gestureMatched ?? isvalid?.codeMatched),
+                              detectedGestureName: isvalid?.detectedGestureName || "",
+                              detectedCode: isvalid?.detectedCode || "",
+                              isValidWasteReport: Boolean(isvalid?.isValidWasteReport),
+                              isFraudulent: Boolean(isvalid?.isFraudulent),
+                              fraudReason: isvalid?.fraudReason || "",
+                              summary: isvalid?.summary || "",
+                              auditResult: isvalid,
+                              verifiedBy: userId || null,
+                              verifiedAt: new Date(),
+                        };
 
-                        
+                        if(action === "marked") {
                         await MarkedSpot.findByIdAndUpdate(savedSpotId, {
                               isVerified: isVerified,
                               isCompletedVerify: "completed",
                               isCompletedVerifyAt: new Date(),
-                              isAiVerified: {
-                                    isAiOrEdited: Boolean(isvalid?.isAiOrEdited),
-                                    forensicConfidence: Number(isvalid?.forensicConfidence || 0),
-                                    detectedManipulationType: isvalid?.detectedManipulationType || "",
-                                    forensicDetails: isvalid?.forensicDetails || "",
-                                    gestureMatched: Boolean(isvalid?.gestureMatched ?? isvalid?.codeMatched),
-                                    isValidWasteReport: Boolean(isvalid?.isValidWasteReport),
-                                    isFraudulent: Boolean(isvalid?.isFraudulent),
-                                    fraudReason: isvalid?.fraudReason || "",
-                                    auditResult: isvalid,
-                                    verifiedBy: userId,
-                                    verifiedAt: new Date(),
-                              }
+                              isAiVerified: aiVerifiedData,
                         });
                   }
                   else if(action === "completed" && isVerified) {
@@ -194,6 +197,7 @@ const aiVerification = async (req, verificationData, savedSpotId, action = "mark
                               isFraudulent: Boolean(isvalid?.isFraudulent),
                               fraudReason: isvalid?.fraudReason || "",
                               forensicDetails: isvalid?.forensicDetails || "",
+                              aiVerified: aiVerifiedData,
                               message: isVerified
                                     ? action === "completed"
                                           ? "AI Audit Complete: Spot cleanup has been verified authentic! ✓"
@@ -1265,7 +1269,6 @@ export const getRandomGestureVerification = async (req, res, next) => {
                         markedBy: userId,
                         $or: [
                               { "preCodeOrGestureForMark.isUserCompleted": false },
-                              { isUserCompleted: false },
                         ],
                   },
                   {
@@ -1381,7 +1384,6 @@ export const getRandomCodeVerification = async (req, res, next) => {
                         markedBy: userId,
                         $or: [
                               { "preCodeOrGestureForMark.isUserCompleted": false },
-                              { isUserCompleted: false },
                         ],
                   },
                   {
@@ -1406,7 +1408,6 @@ export const getRandomCodeVerification = async (req, res, next) => {
                   markedBy: userId,
                   $or: [
                         { "preCodeOrGestureForMark.isUserCompleted": false },
-                        { isUserCompleted: false },
                   ],
                   _id: { $ne: randomVerification._id }
             });

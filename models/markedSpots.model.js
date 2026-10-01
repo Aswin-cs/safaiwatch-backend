@@ -162,6 +162,18 @@ const markedSpotsSchema = new mongoose.Schema(
                               type: String,
                               default: ''
                         },
+                        detectedGestureName: {
+                              type: String,
+                              default: ''
+                        },
+                        detectedCode: {
+                              type: String,
+                              default: ''
+                        },
+                        summary: {
+                              type: String,
+                              default: ''
+                        },
                         auditResult: {
                               type: Object,
                               default: {}
@@ -169,7 +181,7 @@ const markedSpotsSchema = new mongoose.Schema(
                         verifiedBy: {
                               type: mongoose.Schema.Types.ObjectId,
                               ref: 'User',
-                              required: true
+                              required: false,
                         },
                         verifiedAt: {
                               type: Date,
