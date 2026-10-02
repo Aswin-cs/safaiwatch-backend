@@ -19,9 +19,9 @@ export async function getImageFRomCLoudinary() {
 
 export const SYSTEM_INSTRUCTION_WITH_FORENSICS = `
 You are the visual auditing and forensic inspection agent for SafaiWatch, a civic sanitation management platform.
-Your objective is to evaluate a submitted report image (Image 2) against a target hand gesture reference icon (Image 1) and determine if the report is authentic, verified, and free of fraud.
+Your objective is to evaluate a submitted report image (Image 2) against a target hand gesture reference icon (Image 1) and determine if the report is authentic, verified, free of fraud, and assess its waste criticality level.
 
-Conduct a rigorous step-by-step audit across three distinct phases:
+Conduct a rigorous step-by-step audit across four distinct phases:
 
 ---
 
@@ -58,6 +58,18 @@ Evaluate the background of Image 2 to confirm a legitimate civic waste incident.
 
 RULE: If Image 2 lacks real outdoor waste or shows a non-waste scene, set isValidWasteReport = false, set isFraudulent = true, and set fraudReason = "NO_WASTE_DETECTED".
 
+---
+
+PHASE 4: WASTE CRITICALITY & SEVERITY EVALUATION
+Evaluate the scale, environmental hazard, and urgency of the waste incident shown in Image 2.
+Categorize the criticality level (\`critcal\`) using one of these four exact categories:
+- "Very High": Severe public health or environmental emergency — massive illegal dumping, toxic/hazardous waste, medical waste, or severe garbage accumulation completely blocking roads, public transit, or drainage waterways.
+- "High": Heavy waste accumulation — large overflowing dumpster piles, major street littering, large open garbage heaps impacting public walkways or drainage.
+- "Medium": Moderate waste site — scattered household trash, multiple garbage bags, or localized debris requiring standard municipal cleanup.
+- "Low": Minor incident — small isolated litter item, single piece of trash, or light scattered debris.
+
+RULE: Assign \`critcal\` to one of ["Very High", "High", "Medium", "Low"] reflecting the visual severity of the reported waste incident.
+
 
 OUTPUT DIRECTIVE:
 Provide your final verdict strictly matching the required JSON schema. Maintain deterministic, objective, and strict evaluation standards to protect SafaiWatch platform integrity.
@@ -65,9 +77,9 @@ Provide your final verdict strictly matching the required JSON schema. Maintain 
 
 export const SYSTEM_INSTRUCTION_CODE_FORENSICS = (targetCode) => `
 You are the visual auditing and forensic inspection agent for SafaiWatch, a civic sanitation management platform.
-Your objective is to evaluate a submitted report image against a target verification code "${targetCode}" and determine if the report is authentic, verified, and free of fraud.
+Your objective is to evaluate a submitted report image against a target verification code "${targetCode}" and determine if the report is authentic, verified, free of fraud, and assess its waste criticality level.
 
-Conduct a rigorous step-by-step audit across three distinct phases:
+Conduct a rigorous step-by-step audit across four distinct phases:
 
 ---
 
@@ -89,6 +101,18 @@ PHASE 3: MUNICIPAL WASTE SITE VERIFICATION
 Evaluate the image background to confirm a legitimate civic waste incident in a public/outdoor area.
 RULE: If the image lacks real outdoor waste or shows a non-waste scene, set isValidWasteReport = false, set isFraudulent = true, and set fraudReason = "NO_WASTE_DETECTED".
 
+---
+
+PHASE 4: WASTE CRITICALITY & SEVERITY EVALUATION
+Evaluate the scale, environmental hazard, and urgency of the waste incident shown in the image.
+Categorize the criticality level (\`critcal\`) using one of these four exact categories:
+- "Very High": Severe public health or environmental emergency — massive illegal dumping, toxic/hazardous waste, medical waste, or severe garbage accumulation completely blocking roads, public transit, or drainage waterways.
+- "High": Heavy waste accumulation — large overflowing dumpster piles, major street littering, large open garbage heaps impacting public walkways or drainage.
+- "Medium": Moderate waste site — scattered household trash, multiple garbage bags, or localized debris requiring standard municipal cleanup.
+- "Low": Minor incident — small isolated litter item, single piece of trash, or light scattered debris.
+
+RULE: Assign \`critcal\` to one of ["Very High", "High", "Medium", "Low"] reflecting the visual severity of the reported waste incident.
+
 
 OUTPUT DIRECTIVE:
 Provide your final verdict strictly matching the required JSON schema.
@@ -104,6 +128,11 @@ export const SAFEIWATCH_AUDIT_SCHEMA = {
             forensicConfidence: {
                   type: Type.NUMBER,
                   description: "Confidence score between 0.00 and 1.00 for the forensic analysis authenticity rating."
+            },
+            critcal: {
+                  type: Type.STRING,
+                  enum: ["Very High", "High", "Medium", "Low"],
+                  description: "Evaluated critical severity level of the reported waste incident ('Very High', 'High', 'Medium', or 'Low')."
             },
             detectedManipulationType: {
                   type: Type.STRING,
@@ -143,6 +172,7 @@ export const SAFEIWATCH_AUDIT_SCHEMA = {
       required: [
             "isAiOrEdited",
             "forensicConfidence",
+            "critcal",
             "detectedManipulationType",
             "forensicDetails",
             "gestureMatched",
@@ -164,6 +194,11 @@ export const SAFEIWATCH_CODE_AUDIT_SCHEMA = {
             forensicConfidence: {
                   type: Type.NUMBER,
                   description: "Confidence score between 0.00 and 1.00 for the forensic analysis authenticity rating."
+            },
+            critcal: {
+                  type: Type.STRING,
+                  enum: ["Very High", "High", "Medium", "Low"],
+                  description: "Evaluated critical severity level of the reported waste incident ('Very High', 'High', 'Medium', or 'Low')."
             },
             detectedManipulationType: {
                   type: Type.STRING,
@@ -203,6 +238,7 @@ export const SAFEIWATCH_CODE_AUDIT_SCHEMA = {
       required: [
             "isAiOrEdited",
             "forensicConfidence",
+            "critcal",
             "detectedManipulationType",
             "forensicDetails",
             "codeMatched",
@@ -300,6 +336,7 @@ export const aiPhotoVerification = async (input, mimeTypeParam, verificationData
             return {
                   isAiOrEdited: false,
                   forensicConfidence: 0.95,
+                  critcal: "Low",
                   detectedManipulationType: "AUTHENTIC_PHOTO",
                   forensicDetails: "Simulation mode: No anomalies detected.",
                   gestureMatched: true,

@@ -101,32 +101,32 @@ const markedSpotsSchema = new mongoose.Schema(
                   default: 1
             },
             preCodeOrGestureForMark: {
-                  type:{
+                  type: {
                         isUserCompleted: {
                               type: Boolean,
                               default: false
                         },
                         verificationtype: {
-                        type: String,
-                        enum: ["code", "gesture"],
+                              type: String,
+                              enum: ["code", "gesture"],
                         },
-                        verificationCode:{
-                        type: String,
+                        verificationCode: {
+                              type: String,
                         },
                         verificationGesture: {
-                        type: String,
+                              type: String,
                         },
                         isCodeOrGestureVerified: {
-                        type: Boolean,
+                              type: Boolean,
                         },
                         expectedCompletionDate: {
-                        type: Date,
+                              type: Date,
                         },
-                        },
-                        isUserCompleted: {
-                              type: Boolean,
-                              default: false
-                        }
+                  },
+                  isUserCompleted: {
+                        type: Boolean,
+                        default: false
+                  }
             },
             isAiVerified: {
                   type: {
@@ -137,6 +137,11 @@ const markedSpotsSchema = new mongoose.Schema(
                         forensicConfidence: {
                               type: Number,
                               default: 0
+                        },
+                        critcal: {
+                              type: String,
+                              enum: ['Very High', 'High', 'Medium', 'Low'],
+                              default: 'Low'
                         },
                         detectedManipulationType: {
                               type: String,
@@ -177,11 +182,6 @@ const markedSpotsSchema = new mongoose.Schema(
                         auditResult: {
                               type: Object,
                               default: {}
-                        },
-                        verifiedBy: {
-                              type: mongoose.Schema.Types.ObjectId,
-                              ref: 'User',
-                              required: false,
                         },
                         verifiedAt: {
                               type: Date,

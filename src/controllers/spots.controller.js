@@ -19,7 +19,6 @@ import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import { JWT_SECRET } from "../../config/envConfig.js";
 import oneTimeModel from "../../models/one-time.model.js";
-import { on } from "events";
 
 /**
  * Helper to get user ID from req.user or JWT token if available
@@ -104,11 +103,12 @@ const aiVerification = async (req, verificationData, savedSpotId, action = "mark
                   const isvalid = await aiPhotoVerification(fileInput, req.file?.mimetype || "image/jpeg", verificationData, "real");
                   console.log(isvalid, `AI Audit Verification Result (${action})`);
                   const isVerified = Boolean(!isvalid?.isAiOrEdited && !isvalid?.isFraudulent);
-                  
+
                   if (savedSpotId && isvalid) {
                         const aiVerifiedData = {
                               isAiOrEdited: Boolean(isvalid?.isAiOrEdited),
                               forensicConfidence: Number(isvalid?.forensicConfidence || 0),
+                              critcal: isvalid?.critcal || isvalid?.critical || "Low",
                               detectedManipulationType: isvalid?.detectedManipulationType || (isvalid?.isAiOrEdited ? "AI_GENERATED" : "AUTHENTIC_PHOTO"),
                               forensicDetails: isvalid?.forensicDetails || isvalid?.summary || "",
                               gestureMatched: Boolean(isvalid?.gestureMatched ?? isvalid?.codeMatched),
@@ -119,39 +119,38 @@ const aiVerification = async (req, verificationData, savedSpotId, action = "mark
                               fraudReason: isvalid?.fraudReason || "",
                               summary: isvalid?.summary || "",
                               auditResult: isvalid,
-                              verifiedBy: userId || null,
                               verifiedAt: new Date(),
                         };
 
-                        if(action === "marked") {
-                        await MarkedSpot.findByIdAndUpdate(savedSpotId, {
-                              isVerified: isVerified,
-                              isCompletedVerify: "completed",
-                              isCompletedVerifyAt: new Date(),
-                              isAiVerified: aiVerifiedData,
-                        });
-                  }
-                  else if(action === "completed" && isVerified) {
-                        await newFunction(userId, savedSpotId, oneTimeRecordId, action);
-                  } else if(action === "completed" && !isVerified) {
-                        const failMsg = isvalid?.fraudReason || isvalid?.forensicDetails || "AI verification failed: Photo did not pass authenticity or cleanliness audit.";
-                        if (oneTimeRecordId) {
-                              await oneTimeModel.findByIdAndUpdate(oneTimeRecordId, {
-                                    message: failMsg,
-                                    status: "failed",
-                                    isVerified: false,
-                                    aiAuditResult: isvalid,
+                        if (action === "marked") {
+                              await MarkedSpot.findByIdAndUpdate(savedSpotId, {
+                                    isVerified: isVerified,
+                                    isCompletedVerify: "completed",
+                                    isCompletedVerifyAt: new Date(),
+                                    isAiVerified: aiVerifiedData,
                               });
                         }
-                        await UserStatus.findOneAndUpdate(
-                              { $or: [{ user: userId }, { userId }], "AssignedSpots._id": savedSpotId },
-                              {
-                                    $set: { "AssignedSpots.$.isPending": false },
-                                    $inc: { pendingCount: -1 }
+                        else if (action === "completed" && isVerified) {
+                              await newFunction(userId, savedSpotId, oneTimeRecordId, action);
+                        } else if (action === "completed" && !isVerified) {
+                              const failMsg = isvalid?.fraudReason || isvalid?.forensicDetails || "AI verification failed: Photo did not pass authenticity or cleanliness audit.";
+                              if (oneTimeRecordId) {
+                                    await oneTimeModel.findByIdAndUpdate(oneTimeRecordId, {
+                                          message: failMsg,
+                                          status: "failed",
+                                          isVerified: false,
+                                          aiAuditResult: isvalid,
+                                    });
                               }
-                        );
-                  }
-                  
+                              await UserStatus.findOneAndUpdate(
+                                    { $or: [{ user: userId }, { userId }], "AssignedSpots._id": savedSpotId },
+                                    {
+                                          $set: { "AssignedSpots.$.isPending": false },
+                                          $inc: { pendingCount: -1 }
+                                    }
+                              );
+                        }
+
                         (async () => {
                               if (isVerified) {
                                     try {
@@ -214,7 +213,7 @@ const aiVerification = async (req, verificationData, savedSpotId, action = "mark
                               console.error("Socket emit error for spot:ai-verified:", socketErr);
                         }
                   }
-                  
+
             } catch (error) {
                   console.log(error, `error in aiPhotoVerification (${action})`);
             }
@@ -228,7 +227,7 @@ export const markSpot = async (req, res, next) => {
             if (!userId) {
                   return next(errorHandler(401, "Unauthorized"));
             }
-            const isVerified = await preImageOrCodeVerification(req,"mark");
+            const isVerified = await preImageOrCodeVerification(req, "mark");
             console.log(isVerified, "isVerified,,,,,,,,,,,,,");
             imageUrl = await handleImageUpload(req, "SafaiWatch_spots");
 
@@ -261,8 +260,8 @@ export const markSpot = async (req, res, next) => {
 
             session.startTransaction();
             const newSpot = await MarkedSpot.findByIdAndUpdate({
-                  _id: isVerified?.id 
-            },{
+                  _id: isVerified?.id
+            }, {
                   address,
                   type: type === "Point" ? "Point" : "Point",
                   coordinates,
@@ -275,7 +274,7 @@ export const markSpot = async (req, res, next) => {
 
             }).session(session);
 
-            const aiData = await aiVerification(req, isVerified,isVerified.id);
+            const aiData = await aiVerification(req, isVerified, isVerified.id);
             let userStatus = await UserStatus.findOne({
                   $or: [{ user: userId }, { userId }],
             }).session(session);
@@ -931,21 +930,21 @@ export const completeSpot = async (req, res, next) => {
             const completedImageUrl = typeof completedUploadRes === "string" ? completedUploadRes : (completedUploadRes?.secure_url || completedUploadRes?.url || "");
             const completedImagePublicId = typeof completedUploadRes === "object" ? (completedUploadRes?.public_id || "") : "";
             const userStatus = await UserStatus.findOneAndUpdate(
-            {
-                  $or: [{ user: userId }, { userId }],
-                  "AssignedSpots._id": spot._id, // MongoDB finds the exact index using its query engine
-            },
-            {
-                  $set: {
-                  "AssignedSpots.$.isPending": true, // '$' refers directly to the matched element
-      },
-            $inc: {
-             pendingCount: 1, // Atomically increments pendingCount in the same operation
-            },
-            },
-            { new: true } // Returns the updated document immediately
+                  {
+                        $or: [{ user: userId }, { userId }],
+                        "AssignedSpots._id": spot._id, // MongoDB finds the exact index using its query engine
+                  },
+                  {
+                        $set: {
+                              "AssignedSpots.$.isPending": true, // '$' refers directly to the matched element
+                        },
+                        $inc: {
+                              pendingCount: 1, // Atomically increments pendingCount in the same operation
+                        },
+                  },
+                  { new: true } // Returns the updated document immediately
             );
-            
+
             if (!userStatus) {
                   return next(errorHandler(404, "User status not found"));
             }
@@ -985,7 +984,7 @@ export const completeSpot = async (req, res, next) => {
             });
             //// we need ai verification for completed image and then we can update the spot with ai verification result
 
-           
+
       } catch (error) {
             if (session.inTransaction()) {
                   await session.abortTransaction();
@@ -1018,7 +1017,7 @@ const newFunction = async (userId, spotId, oneTimeRecordId, action) => {
             });
 
             await spot.save({ session });
-             let userStatus = await UserStatus.findOne({
+            let userStatus = await UserStatus.findOne({
                   $or: [{ user: userId }, { userId }],
             }).session(session);
             await oneTimeModel.findByIdAndDelete(oneTimeRecordId).session(session);
@@ -1150,7 +1149,7 @@ const newFunction = async (userId, spotId, oneTimeRecordId, action) => {
                   console.error("Socket emit error in completeSpot:", socketErr);
             }
 
-           
+
 
       }
       catch (error) {
@@ -1205,7 +1204,7 @@ export const getRandomGestureVerification = async (req, res, next) => {
             if (!isValidUser) {
                   return next(errorHandler(404, "User not found"));
             }
-            
+
 
             const imageUrl = await getImageFRomCLoudinary();
             if (!imageUrl) {
