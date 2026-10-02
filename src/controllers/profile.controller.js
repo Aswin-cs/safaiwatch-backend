@@ -190,6 +190,10 @@ export const getMyProfile = async (req, res, next) => {
                         completedAt: s.completedAt || s.updatedAt,
                         critical: s.critcal || s.critical || "Medium",
                         description: s.description || s.address,
+                        isVerified: Boolean(s.isVerified),
+                        isCompletedVerify: s.isCompletedVerify || "completed",
+                        isCompletedVerifyAt: s.isCompletedVerifyAt,
+                        isAiVerified: s.isAiVerified || null,
                   };
             });
 
@@ -246,9 +250,9 @@ export const getMyProfile = async (req, res, next) => {
             let userCases = [];
 
             if (userRole === "civilian") {
-                  userCases = [...markedCaseItems];
+                  userCases = [...markedCaseItems, ...completedCaseItems];
             } else if (userRole === "coordinator") {
-                  userCases = [...assignedCaseItems, ...completedCaseItems];
+                  userCases = [...assignedCaseItems, ...completedCaseItems, ...markedCaseItems];
             } else {
                   userCases = [...markedCaseItems, ...assignedCaseItems, ...completedCaseItems];
             }
@@ -533,6 +537,10 @@ export const getProfileByUsername = async (req, res, next) => {
                         completedAt: s.completedAt || s.updatedAt,
                         critical: s.critcal || s.critical || "Medium",
                         description: s.description || s.address,
+                        isVerified: Boolean(s.isVerified),
+                        isCompletedVerify: s.isCompletedVerify || "completed",
+                        isCompletedVerifyAt: s.isCompletedVerifyAt,
+                        isAiVerified: s.isAiVerified || null,
                   };
             });
 
@@ -593,21 +601,19 @@ export const getProfileByUsername = async (req, res, next) => {
                         completedAt: s.isCompleted ? (s.updatedAt || s.markedAt) : undefined,
                         critical: s.critcal || s.critical || "Medium",
                         description: s.description || s.address,
-                        ...(isOwner && {
-                              isVerified: Boolean(s.isVerified),
-                              isCompletedVerify: s.isCompletedVerify || "pending",
-                              isCompletedVerifyAt: s.isCompletedVerifyAt,
-                              isAiVerified: s.isAiVerified || null,
-                        }),
+                        isVerified: Boolean(s.isVerified),
+                        isCompletedVerify: s.isCompletedVerify || "pending",
+                        isCompletedVerifyAt: s.isCompletedVerifyAt,
+                        isAiVerified: s.isAiVerified || null,
                   };
             });
 
             let userCases = [];
 
             if (userRole === "civilian") {
-                  userCases = [...markedCaseItems];
+                  userCases = [...markedCaseItems, ...completedCaseItems];
             } else if (userRole === "coordinator") {
-                  userCases = [...assignedCaseItems, ...completedCaseItems];
+                  userCases = [...assignedCaseItems, ...completedCaseItems, ...markedCaseItems];
             } else {
                   userCases = [...markedCaseItems, ...assignedCaseItems, ...completedCaseItems];
             }
