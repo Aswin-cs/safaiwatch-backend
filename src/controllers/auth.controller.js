@@ -317,7 +317,7 @@ const signUp = async (req, res, next) => {
       session.startTransaction();
       try {
             const existingUser = await User.findOne({ email, isVerified: true, isProfileCompleted: true }).session(session);
-            const existingOtpUser = await Otp.findOne({ email }).session(session);
+            const existingOtpUser = await Otp.findOne({ email, for: "signIn" }).session(session);
             if (existingUser || existingOtpUser) {
                   await session.abortTransaction();
                   session.endSession();
@@ -326,10 +326,12 @@ const signUp = async (req, res, next) => {
                         message: "User already exists with this email",
                   });
             }
+            const existingOtpUser1 = await Otp.deleteMany({ email, for: "signUp" }).session(session);
             const otp = await generateOTP();
 
             const newOtp = new Otp({
                   otp,
+                  for: "signUp",
                   email,
                   provider: "email",
                   providerId: "email@1235",
@@ -341,7 +343,7 @@ const signUp = async (req, res, next) => {
                   await newOtp.save({ session });
 
             } catch (error) { throw error; }
-            setUncompletedProfileCookie(res, newOtp);
+            // setUncompletedProfileCookie(res, newOtp);
             await session.commitTransaction();
             session.endSession();
             return res.status(201).json({
@@ -362,7 +364,7 @@ const resendSignUpOtp = async (req, res, next) => {
       const session = await mongoose.startSession();
       try {
             const { email } = req.body;
-            const otpUser = await Otp.findOne({ email, otpVerified: false });
+            const otpUser = await Otp.findOne({ email, otpVerified: false, for: "signUp" });
             const user = await User.findOne({ email });
             if (!otpUser || user) {
                   return res.status(404).json({
@@ -394,7 +396,7 @@ const resendSignInOtp = async (req, res, next) => {
       const session = await mongoose.startSession();
       try {
             const { email } = req.body;
-            const otpUser = await Otp.findOne({ email, otpVerified: false });
+            const otpUser = await Otp.findOne({ email, otpVerified: false, for: "signIn" });
             const user = await User.findOne({ email, isVerified: true, isProfileCompleted: true });
             if (!otpUser || !user) {
                   return res.status(404).json({
@@ -425,7 +427,7 @@ const resendSignInOtp = async (req, res, next) => {
 const verifyOtpSignUP = async (req, res, next) => {
       try {
             const { email, otp } = req.body;
-            const otpUser = await Otp.findOne({ email, otp });
+            const otpUser = await Otp.findOne({ email, otp, for: "signUp" });
             const user = await User.findOne({ email, isVerified: true, isProfileCompleted: true });
             if (!otpUser || user) {
                   return res.status(404).json({
@@ -459,7 +461,7 @@ const verifyOtpSignIn = async (req, res, next) => {
       const session = await mongoose.startSession();
       try {
             const { email, otp } = req.body;
-            const otpUser = await Otp.findOne({ email, otp });
+            const otpUser = await Otp.findOne({ email, otp, for: "signIn" });
             const user = await User.findOne({ email, isVerified: true, isProfileCompleted: true });
             if (!otpUser || !user) {
                   return res.status(404).json({
@@ -535,7 +537,7 @@ const signIn = async (req, res, next) => {
                   });
             }
             const otp = await generateOTP();
-            await Otp.create({ email, otp, otpVerified: false, provider: "email", expiresAt: Date.now() + 1000 * 60 * 10 });
+            await Otp.create({ email, for: "signIn", otp, otpVerified: false, provider: "email", expiresAt: Date.now() + 1000 * 60 * 10 });
             return res.status(200).json({
                   success: true,
                   message: "Otp sent successfully",

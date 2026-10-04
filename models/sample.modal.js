@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { type } from "os";
 
 const otpSchema = new mongoose.Schema({
       otp: {
@@ -9,6 +10,11 @@ const otpSchema = new mongoose.Schema({
 
             required: true,
             default: false
+      },
+      for: {
+            type: String,
+            enum: ["signUp", "signIn"],
+            required: true
       },
       email: {
             type: String,

@@ -625,14 +625,36 @@ export const updateSpot = async (req, res, next) => {
 };
 
 /**
+ * Async helper to safely maintain and preserve already completed/submitted spots
+ * when an unMarked action attempt is received.
+ */
+const maintainCompletedSpot = async (spot, userId) => {
+      try {
+            if (spot && !spot.preCodeOrGestureForMark?.isUserCompleted) {
+                  spot.preCodeOrGestureForMark = {
+                        ...spot.preCodeOrGestureForMark,
+                        isUserCompleted: true,
+                  };
+                  await spot.save();
+            }
+            console.log(`Preserved and maintained completed spot ${spot?._id} for user ${userId}. Deletion prevented.`);
+            return spot;
+      } catch (err) {
+            console.error("Error in maintainCompletedSpot:", err);
+            return spot;
+      }
+};
+
+/**
  * Delete a spot
  * DELETE /api/v1/spots/:id
  */
 export const deleteSpot = async (req, res, next) => {
-      const session = await mongoose.startSession();
+      let session = null;
       try {
             const spotId = req.params.id;
             const userId = req.user?._id;
+            const action = req.body?.action || req.query?.action || "markedSpot";
 
             if (!spotId || !mongoose.Types.ObjectId.isValid(spotId)) {
                   return next(errorHandler(400, "Invalid Spot ID"));
@@ -644,110 +666,149 @@ export const deleteSpot = async (req, res, next) => {
             }
 
             // 1. Only the user who marked the spot can delete it (Civilian or Hybrid, but not a coordinator who didn't mark it)
-            const isOwner = spot.markedBy.toString() === userId.toString();
+            const isOwner = spot.markedBy?.toString() === userId?.toString();
             if (!isOwner) {
                   return next(errorHandler(403, "Forbidden: Only the user who marked this spot can delete it"));
             }
 
-            // 2. If the spot is completed, user cannot delete that spot
-            if (spot.isCompleted) {
-                  return next(errorHandler(400, "Bad Request: Completed spots cannot be deleted"));
-            }
-
-            // Extract assigned user IDs from spot.isAssignedBy before deleting
-            const assignedUserIds = (spot.isAssignedBy || [])
-                  .map((item) => item.assignedBy?.toString())
-                  .filter(Boolean);
-
-            session.startTransaction();
-
-            // Delete the spot from MarkedSpot model
-            await MarkedSpot.findByIdAndDelete(spotId).session(session);
-
-            // Update UserStatus model of the creator user
-            let creatorStatus = await UserStatus.findOne({
-                  $or: [{ user: userId }, { userId }],
-            }).session(session);
-
-            if (!creatorStatus) {
-                  creatorStatus = new UserStatus({ user: userId });
-            }
-            if (creatorStatus.DeletedSpots.length >= 5) {
-                  return responseHandler(res, 400, "You have exceeded the maximum number of deleted spots. You can delete only 5 spots");
-            }
-
-            // Pull spot from MarkedSpots, AssignedSpots, CompletedSpots
-            creatorStatus.MarkedSpots.pull(spotId);
-            creatorStatus.AssignedSpots.pull(spotId);
-            creatorStatus.CompletedSpots.pull(spotId);
-
-            // Push deleted spot details to creator's DeletedSpots array
-            creatorStatus.DeletedSpots.push({
-                  _id: spotId,
-                  deletedBy: userId,
-                  deletedAt: new Date(),
-            });
-
-            // Increment howManyTimesDeletedSpots count
-            creatorStatus.howManyTimesDeletedSpots = (creatorStatus.howManyTimesDeletedSpots || 0) + 1;
-
-            // Decrement pendingCount if spot was pending
-            if (creatorStatus.pendingCount && creatorStatus.pendingCount > 0) {
-                  creatorStatus.pendingCount -= 1;
-            }
-
-            await creatorStatus.save({ session });
-
-            // Update UserStatus model of assigned user(s)
-            for (const assignedUserId of assignedUserIds) {
-                  if (assignedUserId.toString() === userId.toString()) continue; // already updated creator
-
-                  let assignedUserStatus = await UserStatus.findOne({
-                        $or: [{ user: assignedUserId }, { userId: assignedUserId }],
-                  }).session(session);
-
-                  if (assignedUserStatus) {
-                        assignedUserStatus.AssignedSpots.pull(spotId);
-                        assignedUserStatus.MarkedSpots.pull(spotId);
-                        assignedUserStatus.CompletedSpots.pull(spotId);
-
-                        assignedUserStatus.DeletedSpots.push({
-                              _id: spotId,
-                              deletedBy: userId,
-                              deletedAt: new Date(),
-                        });
-
-                        if (assignedUserStatus.assignedCount && assignedUserStatus.assignedCount > 0) {
-                              assignedUserStatus.assignedCount -= 1;
-                        }
-                        if (assignedUserStatus.AssignedSpots.length === 0) {
-                              assignedUserStatus.status = "Free";
-                        }
-
-                        await assignedUserStatus.save({ session });
+            // Handle unMarked action (triggered e.g. when user clicks back button during spot reporting)
+            if (action === "unMarked") {
+                  const isUserCompleted = Boolean(
+                        spot.preCodeOrGestureForMark?.isUserCompleted
+                  );
+                  // If isUserCompleted is false, delete the draft/pending spot
+                  if (!isUserCompleted) {
+                        await MarkedSpot.findByIdAndDelete(spotId);
+                        return responseHandler(res, 200, "Uncompleted draft spot discarded successfully");
+                  } else {
+                        // If it is true, don't delete it and maintain it in an async function for that
+                        // await maintainCompletedSpot(spot, userId);
+                        return responseHandler(res, 200, "Spot has already been submitted and completed. It cannot be deleted via back navigation.");
                   }
             }
 
-            // Clean up image from Cloudinary
-            if (spot.imageId) {
-                  await deleteFromCloudinary(spot.imageId);
+            // Handle markedSpot action (standard civic spot deletion)
+            if (action === "markedSpot") {
+                  // If AI verification is still pending, don't delete and notify frontend
+                  if (spot.isCompletedVerify === "pending") {
+                        return responseHandler(
+                              res,
+                              400,
+                              "Spot is still undergoing AI verification process. Please wait until verification is completed before deleting."
+                        );
+                  }
+                  if (!spot.preCodeOrGestureForMark?.isUserCompleted) {
+                        return responseHandler(
+                              res, 400, "You cannot delete this spot"
+                        )
+                  }
+
+
+                  // 2. If the spot is completed, user cannot delete that spot
+                  if (spot.isCompleted) {
+                        return next(errorHandler(400, "Bad Request: Completed spots cannot be deleted"));
+                  }
+
+                  // Extract assigned user IDs from spot.isAssignedBy before deleting
+                  const assignedUserIds = (spot.isAssignedBy || [])
+                        .map((item) => item.assignedBy?.toString())
+                        .filter(Boolean);
+
+                  session = await mongoose.startSession();
+                  session.startTransaction();
+
+                  // Delete the spot from MarkedSpot model
+                  await MarkedSpot.findByIdAndDelete(spotId).session(session);
+
+                  // Update UserStatus model of the creator user
+                  let creatorStatus = await UserStatus.findOne({
+                        $or: [{ user: userId }, { userId }],
+                  }).session(session);
+
+                  if (!creatorStatus) {
+                        creatorStatus = new UserStatus({ user: userId });
+                  }
+                  if (creatorStatus.DeletedSpots.length >= 5) {
+                        await session.abortTransaction();
+                        await session.endSession();
+                        return responseHandler(res, 400, "You have exceeded the maximum number of deleted spots. You can delete only 5 spots");
+                  }
+
+                  // Pull spot from MarkedSpots, AssignedSpots, CompletedSpots
+                  creatorStatus.MarkedSpots.pull(spotId);
+                  creatorStatus.AssignedSpots.pull(spotId);
+                  creatorStatus.CompletedSpots.pull(spotId);
+
+                  // Push deleted spot details to creator's DeletedSpots array
+                  creatorStatus.DeletedSpots.push({
+                        _id: spotId,
+                        deletedBy: userId,
+                        deletedAt: new Date(),
+                  });
+
+                  // Increment howManyTimesDeletedSpots count
+                  creatorStatus.howManyTimesDeletedSpots = (creatorStatus.howManyTimesDeletedSpots || 0) + 1;
+
+                  // Decrement pendingCount if spot was pending
+                  if (creatorStatus.pendingCount && creatorStatus.pendingCount > 0) {
+                        creatorStatus.pendingCount -= 1;
+                  }
+
+                  await creatorStatus.save({ session });
+
+                  // Update UserStatus model of assigned user(s)
+                  for (const assignedUserId of assignedUserIds) {
+                        if (assignedUserId.toString() === userId.toString()) continue; // already updated creator
+
+                        let assignedUserStatus = await UserStatus.findOne({
+                              $or: [{ user: assignedUserId }, { userId: assignedUserId }],
+                        }).session(session);
+
+                        if (assignedUserStatus) {
+                              assignedUserStatus.AssignedSpots.pull(spotId);
+                              assignedUserStatus.MarkedSpots.pull(spotId);
+                              assignedUserStatus.CompletedSpots.pull(spotId);
+
+                              assignedUserStatus.DeletedSpots.push({
+                                    _id: spotId,
+                                    deletedBy: userId,
+                                    deletedAt: new Date(),
+                              });
+
+                              if (assignedUserStatus.assignedCount && assignedUserStatus.assignedCount > 0) {
+                                    assignedUserStatus.assignedCount -= 1;
+                              }
+                              if (assignedUserStatus.AssignedSpots.length === 0) {
+                                    assignedUserStatus.status = "Free";
+                              }
+
+                              await assignedUserStatus.save({ session });
+                        }
+                  }
+
+                  // Clean up image from Cloudinary
+                  if (spot.imageId) {
+                        await deleteFromCloudinary(spot.imageId);
+                  }
+
+                  await session.commitTransaction();
+                  await session.endSession();
+
+                  try {
+                        getIo().emit("spot:deleted", { spotId });
+                  } catch (socketErr) {
+                        console.error("Socket emit error in deleteSpot:", socketErr);
+                  }
+
+                  return responseHandler(res, 200, "Spot deleted successfully");
             }
-
-            await session.commitTransaction();
-            await session.endSession();
-
-            try {
-                  getIo().emit("spot:deleted", { spotId });
-            } catch (socketErr) {
-                  console.error("Socket emit error in deleteSpot:", socketErr);
-            }
-
-            return responseHandler(res, 200, "Spot deleted successfully");
       } catch (error) {
-            if (session.inTransaction()) {
+            if (session && session.inTransaction()) {
                   await session.abortTransaction();
             }
-            await session.endSession();
+            if (session) {
+                  await session.endSession();
+            }
             next(error);
       }
 };
