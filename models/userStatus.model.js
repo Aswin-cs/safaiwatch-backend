@@ -62,7 +62,7 @@ const userStatusSchema = new mongoose.Schema({
                               type: Date,
                               default: Date.now
                         },
-                        isPending:{
+                        isPending: {
                               type: Boolean,
                               default: false
                         }
@@ -140,6 +140,36 @@ const userStatusSchema = new mongoose.Schema({
                               default: Date.now
                         }
 
+                  }
+            ],
+            default: []
+      },
+      reportOnContestSpots: {
+            type: [
+                  {
+                        _id: {
+                              type: mongoose.Schema.Types.ObjectId,
+                              ref: 'Report'
+                        },
+                        reportAt: {
+                              type: Date,
+                              default: Date.now
+                        }
+                  }
+            ],
+            default: []
+      },
+      reportOnCompletedSpots: {
+            type: [
+                  {
+                        _id: {
+                              type: mongoose.Schema.Types.ObjectId,
+                              ref: 'Report'
+                        },
+                        reportAt: {
+                              type: Date,
+                              default: Date.now
+                        }
                   }
             ],
             default: []
