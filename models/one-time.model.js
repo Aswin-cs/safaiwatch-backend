@@ -11,16 +11,20 @@ const oneTimeSchema = new mongoose.Schema({
             ref: "Markspot",
             required: true
       },
-      image:{
+      forWhat: {
+            type: String,
+            enum: ["completeSpot", "reportSpot", "reportCleanUp"]
+      },
+      image: {
             type: String,
       },
-      imageId:{
+      imageId: {
             type: String,
       },
-      guestureImage:{
+      guestureImage: {
             type: String,
       },
-      guestureImageId:{
+      guestureImageId: {
             type: String,
       },
       code: {

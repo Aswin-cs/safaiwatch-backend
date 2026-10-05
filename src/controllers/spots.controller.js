@@ -100,7 +100,7 @@ const aiVerification = async (req, verificationData, savedSpotId, action = "mark
       const userId = req.user?._id;
       (async () => {
             try {
-                  const isvalid = await aiPhotoVerification(fileInput, req.file?.mimetype || "image/jpeg", verificationData, "real");
+                  const isvalid = await aiPhotoVerification(fileInput, req.file?.mimetype || "image/jpeg", verificationData, "simulation");
                   console.log(isvalid, `AI Audit Verification Result (${action})`);
                   const isVerified = Boolean(!isvalid?.isAiOrEdited && !isvalid?.isFraudulent);
 
@@ -1012,6 +1012,7 @@ export const completeSpot = async (req, res, next) => {
 
             const oneTimeRecord = await oneTimeModel.create({
                   user: userId,
+                  forWhat: "completeSpot",
                   markspotid: spot._id,
                   image: completedImageUrl,
                   imageId: completedImagePublicId
@@ -1482,7 +1483,7 @@ export const getRandomCodeVerification = async (req, res, next) => {
       }
 };
 
-const preImageOrCodeVerification = async (req, target = "mark") => {
+export const preImageOrCodeVerification = async (req, target = "mark") => {
       const verificationId =
             req.body?.verificationId ||
             req.body?.gestureVerificationId ||
