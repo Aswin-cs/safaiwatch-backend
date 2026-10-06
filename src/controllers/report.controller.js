@@ -20,15 +20,20 @@ export const reportOnContestSpot = async (req, res) => {
             description,
         } = req.body;
 
-        const userId = bodyUserId || req.user?._id;
-        if (!userId) {
-            return res.status(400).json({ message: "User ID is required" });
+        let user = req.user;
+        if (!user && bodyUserId) {
+            if (mongoose.Types.ObjectId.isValid(bodyUserId)) {
+                user = await User.findById(bodyUserId);
+            }
+            if (!user) {
+                user = await User.findOne({ username: bodyUserId });
+            }
         }
 
-        const user = await User.findById(userId);
         if (!user) {
             return res.status(404).json({ message: "User not found" });
         }
+        const userId = user._id;
         const spot = await MarkedSpot.findById(spotId);
         if (!spot) {
             return res.status(404).json({ message: "Spot not found" });

@@ -36,11 +36,11 @@ const initialize = async (httpServer) => {
 
             // Join user-specific room for targeted notifications (e.g. AI verification completion toasts)
             socket.on('joinUserRoom', (data) => {
-                  const targetUserId = typeof data === 'object' ? (data.userId || data._id || data.id) : data;
-                  if (targetUserId) {
-                        socket.join(`user:${targetUserId}`);
-                        socket.join(String(targetUserId));
-                        console.log(`User socket ${socket.id} joined user room: user:${targetUserId}`);
+                  const targetUser = typeof data === 'object' ? (data.username || data.userId || data._id || data.id) : data;
+                  if (targetUser) {
+                        socket.join(`user:${targetUser}`);
+                        socket.join(String(targetUser));
+                        console.log(`User socket ${socket.id} joined user room: user:${targetUser}`);
                   }
             });
 

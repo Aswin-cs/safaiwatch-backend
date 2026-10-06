@@ -11,6 +11,22 @@ import jwt from "jsonwebtoken";
 import { uploadToCloudinary, deleteFromCloudinary } from "../../utils/Cloudinaryimage.utils.js";
 import { selectedRewards } from "../../utils/rewards.utils.js";
 
+/**
+ * Helper to get user ID from req.user or JWT token if available
+ */
+const getRequesterUserId = async (req) => {
+      if (req.user?._id) return req.user._id.toString();
+      try {
+            const token = req.cookies?.token || (req.headers?.authorization?.startsWith("Bearer ") ? req.headers.authorization.split(" ")[1] : null);
+            if (token) {
+                  const decoded = jwt.verify(token, JWT_SECRET);
+                  const user = await User.findById(decodedToken.userId)
+                  return user ? true : false
+            }
+      } catch (e) { }
+      return false;
+};
+
 const getYYYYMMDD = (d) => {
       if (!d) return "";
       const date = new Date(d);
@@ -101,18 +117,18 @@ export const getMyProfile = async (req, res, next) => {
                         markedBy: userId,
                         "preCodeOrGestureForMark.isUserCompleted": { $ne: false },
                   })
-                        .populate("markedBy", "_id username avatar role")
-                        .populate("isAssignedBy.assignedBy", "_id username avatar role")
-                        .populate("isCompletedBy.completedBy", "_id username avatar role")
+                        .populate("markedBy", "username avatar role")
+                        .populate("isAssignedBy.assignedBy", "username avatar role")
+                        .populate("isCompletedBy.completedBy", "username avatar role")
                         .sort({ markedAt: -1, createdAt: -1 }),
                   MarkedSpot.find({ "isCompletedBy.completedBy": userId })
-                        .populate("markedBy", "_id username avatar role")
-                        .populate("isAssignedBy.assignedBy", "_id username avatar role")
-                        .populate("isCompletedBy.completedBy", "_id username avatar role")
+                        .populate("markedBy", "username avatar role")
+                        .populate("isAssignedBy.assignedBy", "username avatar role")
+                        .populate("isCompletedBy.completedBy", "username avatar role")
                         .sort({ markedAt: -1, createdAt: -1 }),
                   MarkedSpot.find({ "isAssignedBy.assignedBy": userId, isCompleted: false })
-                        .populate("markedBy", "_id username avatar role")
-                        .populate("isAssignedBy.assignedBy", "_id username avatar role")
+                        .populate("markedBy", "username avatar role")
+                        .populate("isAssignedBy.assignedBy", "username avatar role")
                         .sort({ markedAt: -1, createdAt: -1 }),
             ]);
 
@@ -312,7 +328,7 @@ export const getMyProfile = async (req, res, next) => {
 
             return responseHandler(res, 200, "User Profile", {
                   user: {
-                        _id: user._id,
+                        id: user.username,
                         username: user.username,
                         name: user.certificatePreferences?.displayName || user.username,
                         displayName: user.certificatePreferences?.displayName || user.username,
@@ -390,7 +406,7 @@ export const getBasicInfo = async (req, res, next) => {
 
             return responseHandler(res, 200, "User Basic Info", {
                   user: {
-                        _id: user._id,
+                        id: user.username,
                         name: user.name,
                         role: user.role,
                         username: user.username,
@@ -438,28 +454,36 @@ export const getProfileByUsername = async (req, res, next) => {
 
             const userId = user._id;
 
+            const reqUserId = getRequesterUserId(req);
+            const isOwner = Boolean(reqUserId && reqUserId === userId.toString());
+
+            const markedSpotsFilter = {
+                  markedBy: userId,
+                  "preCodeOrGestureForMark.isUserCompleted": { $ne: false },
+            };
+            if (!isOwner) {
+                  markedSpotsFilter.isVerified = true;
+            }
+
             const [userRewards, userStatus, dbMarkedSpots, dbCompletedSpots, dbAssignedSpots] = await Promise.all([
                   UserRewards.findOne({ $or: [{ user: userId }, { userId }] }),
                   UserStatus.findOne({ $or: [{ user: userId }, { userId }] })
                         .populate({ path: "MarkedSpots._id", model: "MarkedSpot" })
                         .populate({ path: "AssignedSpots._id", model: "MarkedSpot" })
                         .populate({ path: "CompletedSpots._id", model: "MarkedSpot" }),
-                  MarkedSpot.find({
-                        markedBy: userId,
-                        "preCodeOrGestureForMark.isUserCompleted": { $ne: false },
-                  })
-                        .populate("markedBy", "_id username avatar role")
-                        .populate("isAssignedBy.assignedBy", "_id username avatar role")
-                        .populate("isCompletedBy.completedBy", "_id username avatar role")
+                  MarkedSpot.find(markedSpotsFilter)
+                        .populate("markedBy", "username avatar role")
+                        .populate("isAssignedBy.assignedBy", "username avatar role")
+                        .populate("isCompletedBy.completedBy", "username avatar role")
                         .sort({ markedAt: -1, createdAt: -1 }),
                   MarkedSpot.find({ "isCompletedBy.completedBy": userId })
-                        .populate("markedBy", "_id username avatar role")
-                        .populate("isAssignedBy.assignedBy", "_id username avatar role")
-                        .populate("isCompletedBy.completedBy", "_id username avatar role")
+                        .populate("markedBy", "username avatar role")
+                        .populate("isAssignedBy.assignedBy", "username avatar role")
+                        .populate("isCompletedBy.completedBy", "username avatar role")
                         .sort({ markedAt: -1, createdAt: -1 }),
                   MarkedSpot.find({ "isAssignedBy.assignedBy": userId, isCompleted: false })
-                        .populate("markedBy", "_id username avatar role")
-                        .populate("isAssignedBy.assignedBy", "_id username avatar role")
+                        .populate("markedBy", "username avatar role")
+                        .populate("isAssignedBy.assignedBy", "username avatar role")
                         .sort({ markedAt: -1, createdAt: -1 }),
             ]);
 
@@ -478,10 +502,12 @@ export const getProfileByUsername = async (req, res, next) => {
                   }
                   const spotIdStr = s._id ? String(s._id) : (typeof s.id === "string" ? s.id : null);
                   if (spotIdStr && s.preCodeOrGestureForMark?.isUserCompleted !== false && !markedMap.has(spotIdStr)) {
-                        markedMap.set(spotIdStr, s);
+                        if (isOwner || s.isVerified === true) {
+                              markedMap.set(spotIdStr, s);
+                        }
                   }
             });
-            const allMarkedSpots = Array.from(markedMap.values());
+            const allMarkedSpots = Array.from(markedMap.values()).filter((s) => isOwner || s.isVerified === true);
 
             const completedMap = new Map();
             dbCompletedSpots.forEach((s) => {
@@ -519,7 +545,7 @@ export const getProfileByUsername = async (req, res, next) => {
 
             const completedCaseItems = allCompletedSpots.map((s, i) => {
                   const spotIdStr = s._id ? String(s._id) : `completed-${i}`;
-                  return {
+                  const completedItem = {
                         id: `${spotIdStr}-completed`,
                         title: typeof s.description === "string" ? s.description : (typeof s.address === "string" ? s.address : "Resolved Civic Spot"),
                         location: typeof s.address === "string" ? s.address : "Cleaned & Verified",
@@ -537,11 +563,16 @@ export const getProfileByUsername = async (req, res, next) => {
                         completedAt: s.completedAt || s.updatedAt,
                         critical: s.critcal || s.critical || "Medium",
                         description: s.description || s.address,
-                        isVerified: Boolean(s.isVerified),
-                        isCompletedVerify: s.isCompletedVerify || "completed",
-                        isCompletedVerifyAt: s.isCompletedVerifyAt,
-                        isAiVerified: s.isAiVerified || null,
                   };
+
+                  if (isOwner) {
+                        completedItem.isVerified = Boolean(s.isVerified);
+                        completedItem.isCompletedVerify = s.isCompletedVerify || "completed";
+                        completedItem.isCompletedVerifyAt = s.isCompletedVerifyAt;
+                        completedItem.isAiVerified = s.isAiVerified || null;
+                  }
+
+                  return completedItem;
             });
 
             const completedSpotIds = new Set(allCompletedSpots.map((s) => String(s._id || s.id)));
@@ -579,12 +610,9 @@ export const getProfileByUsername = async (req, res, next) => {
                         };
                   });
 
-            const reqUserId = req.user?._id?.toString();
-            const isOwner = Boolean(reqUserId && reqUserId === userId.toString());
-
             const markedCaseItems = allMarkedSpots.map((s, i) => {
                   const spotIdStr = s._id ? String(s._id) : `marked-${i}`;
-                  return {
+                  const markedItem = {
                         id: `${spotIdStr}-marked`,
                         title: typeof s.description === "string" ? s.description : (typeof s.address === "string" ? s.address : "Reported Civic Spot"),
                         location: typeof s.address === "string" ? s.address : "Ward Locality",
@@ -601,11 +629,16 @@ export const getProfileByUsername = async (req, res, next) => {
                         completedAt: s.isCompleted ? (s.updatedAt || s.markedAt) : undefined,
                         critical: s.critcal || s.critical || "Medium",
                         description: s.description || s.address,
-                        isVerified: Boolean(s.isVerified),
-                        isCompletedVerify: s.isCompletedVerify || "pending",
-                        isCompletedVerifyAt: s.isCompletedVerifyAt,
-                        isAiVerified: s.isAiVerified || null,
                   };
+
+                  if (isOwner) {
+                        markedItem.isVerified = Boolean(s.isVerified);
+                        markedItem.isCompletedVerify = s.isCompletedVerify || "pending";
+                        markedItem.isCompletedVerifyAt = s.isCompletedVerifyAt;
+                        markedItem.isAiVerified = s.isAiVerified || null;
+                  }
+
+                  return markedItem;
             });
 
             let userCases = [];
@@ -635,7 +668,7 @@ export const getProfileByUsername = async (req, res, next) => {
 
             return responseHandler(res, 200, "User Profile Info", {
                   user: {
-                        _id: user._id,
+                        id: user.username,
                         username: user.username,
                         name: user.certificatePreferences?.displayName || user.username,
                         displayName: user.certificatePreferences?.displayName || user.username,
@@ -712,16 +745,16 @@ export const getUserHistory = async (req, res, next) => {
                         path: "userLikePosts.postId",
                         model: "Post",
                         populate: [
-                              { path: "SpotedUser", select: "_id username name avatar role" },
-                              { path: "CleanedUser", select: "_id username name avatar role" },
+                              { path: "SpotedUser", select: "username name avatar role" },
+                              { path: "CleanedUser", select: "username name avatar role" },
                         ],
                   })
                   .populate({
                         path: "PostThatLinked.postId",
                         model: "Post",
                         populate: [
-                              { path: "SpotedUser", select: "_id username name avatar role" },
-                              { path: "CleanedUser", select: "_id username name avatar role" },
+                              { path: "SpotedUser", select: "username name avatar role" },
+                              { path: "CleanedUser", select: "username name avatar role" },
                         ],
                   });
 
@@ -731,24 +764,24 @@ export const getUserHistory = async (req, res, next) => {
                         markedBy: userId,
                         "preCodeOrGestureForMark.isUserCompleted": { $ne: false },
                   })
-                        .populate("markedBy", "_id username avatar role")
-                        .populate("isAssignedBy.assignedBy", "_id username avatar role")
-                        .populate("isCompletedBy.completedBy", "_id username avatar role")
+                        .populate("markedBy", "username avatar role")
+                        .populate("isAssignedBy.assignedBy", "username avatar role")
+                        .populate("isCompletedBy.completedBy", "username avatar role")
                         .sort({ markedAt: -1, createdAt: -1 }),
                   MarkedSpot.find({ "isCompletedBy.completedBy": userId })
-                        .populate("markedBy", "_id username avatar role")
-                        .populate("isAssignedBy.assignedBy", "_id username avatar role")
-                        .populate("isCompletedBy.completedBy", "_id username avatar role")
+                        .populate("markedBy", "username avatar role")
+                        .populate("isAssignedBy.assignedBy", "username avatar role")
+                        .populate("isCompletedBy.completedBy", "username avatar role")
                         .sort({ markedAt: -1, createdAt: -1 }),
                   MarkedSpot.find({ "isAssignedBy.assignedBy": userId, isCompleted: false })
-                        .populate("markedBy", "_id username avatar role")
-                        .populate("isAssignedBy.assignedBy", "_id username avatar role")
+                        .populate("markedBy", "username avatar role")
+                        .populate("isAssignedBy.assignedBy", "username avatar role")
                         .sort({ markedAt: -1, createdAt: -1 }),
                   Post.find({
                         $or: [{ SpotedUser: userId }, { CleanedUser: userId }],
                   })
-                        .populate("SpotedUser", "_id username name avatar role")
-                        .populate("CleanedUser", "_id username name avatar role")
+                        .populate("SpotedUser", "username name avatar role")
+                        .populate("CleanedUser", "username name avatar role")
                         .sort({ createdAt: -1 }),
             ]);
 
@@ -933,7 +966,7 @@ export const getUserHistory = async (req, res, next) => {
             return responseHandler(res, 200, "User History Data", {
                   role: userRole,
                   user: {
-                        _id: user._id,
+                        id: user.username,
                         username: user.username,
                         name: user.certificatePreferences?.displayName || user.username,
                         displayName: user.certificatePreferences?.displayName || user.username,
@@ -1097,7 +1130,7 @@ export const updateProfile = async (req, res, next) => {
 
             return responseHandler(res, 200, "Profile updated successfully.", {
                   user: {
-                        _id: user._id,
+                        id: user.username,
                         username: user.username,
                         email: user.email,
                         role: user.role,

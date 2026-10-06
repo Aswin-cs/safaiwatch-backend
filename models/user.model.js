@@ -112,4 +112,30 @@ const userSchema = new mongoose.Schema({
 
 });
 
+// Virtual getter for id returning unique username instead of internal MongoDB _id
+userSchema.virtual("id").get(function () {
+      return this.username;
+});
+
+// Configure toJSON and toObject transforms to omit _id/__v and provide username as id
+userSchema.set("toJSON", {
+      virtuals: true,
+      transform: function (doc, ret) {
+            delete ret._id;
+            delete ret.__v;
+            ret.id = ret.username;
+            return ret;
+      },
+});
+
+userSchema.set("toObject", {
+      virtuals: true,
+      transform: function (doc, ret) {
+            delete ret._id;
+            delete ret.__v;
+            ret.id = ret.username;
+            return ret;
+      },
+});
+
 export default mongoose.model("User", userSchema) || mongoose.models.User;

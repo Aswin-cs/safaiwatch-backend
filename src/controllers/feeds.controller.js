@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import Post from "../../models/feeds.model.js";
+import User from "../../models/user.model.js";
 import { responseHandler } from "../../utils/responseHandler.js";
 import { errorHandler } from "../../utils/errorHandler.js";
 import UserStatus from "../../models/userStatus.model.js";
@@ -33,10 +34,20 @@ export const getAllPosts = async (req, res, next) => {
                   req.headers?.["user-id"] ||
                   req.headers?.["userid"];
 
+            let resolvedUserId = req.user?._id;
+            if (!resolvedUserId && userId) {
+                  if (mongoose.Types.ObjectId.isValid(userId)) {
+                        resolvedUserId = userId;
+                  } else {
+                        const u = await User.findOne({ username: userId });
+                        if (u) resolvedUserId = u._id;
+                  }
+            }
+
             const [posts, totalCount] = await Promise.all([
                   Post.find()
-                        .populate("SpotedUser", "_id username avatar role ")
-                        .populate("CleanedUser", "_id username avatar role ")
+                        .populate("SpotedUser", "username avatar role")
+                        .populate("CleanedUser", "username avatar role")
                         .sort({ createdAt: -1 })
                         .skip(skip)
                         .limit(limitNum),
@@ -46,9 +57,9 @@ export const getAllPosts = async (req, res, next) => {
             let likedPostIdsSet = new Set();
             let userLikePosts = [];
 
-            if (userId && mongoose.Types.ObjectId.isValid(userId)) {
+            if (resolvedUserId) {
                   const userStatus = await UserStatus.findOne({
-                        $or: [{ user: userId }, { userId: userId }],
+                        $or: [{ user: resolvedUserId }, { userId: resolvedUserId }],
                   });
                   if (userStatus && Array.isArray(userStatus.userLikePosts)) {
                         userLikePosts = userStatus.userLikePosts;
@@ -127,9 +138,19 @@ export const getParticularPost = async (req, res, next) => {
                   return next ? next(errorHandler(400, "Invalid Post ID")) : res.status(400).json({ success: false, message: "Invalid Post ID" });
             }
 
+            let resolvedUserId = req.user?._id;
+            if (!resolvedUserId && userId) {
+                  if (mongoose.Types.ObjectId.isValid(userId)) {
+                        resolvedUserId = userId;
+                  } else {
+                        const u = await User.findOne({ username: userId });
+                        if (u) resolvedUserId = u._id;
+                  }
+            }
+
             const post = await Post.findById(postId)
-                  .populate("SpotedUser", "_id username avatar role")
-                  .populate("CleanedUser", "_id username avatar role");
+                  .populate("SpotedUser", "username avatar role")
+                  .populate("CleanedUser", "username avatar role");
 
             if (!post) {
                   return next ? next(errorHandler(404, "Post not found")) : res.status(404).json({ success: false, message: "Post not found" });
@@ -138,9 +159,9 @@ export const getParticularPost = async (req, res, next) => {
             const postObj = post.toObject ? post.toObject() : { ...post };
             postObj.isLiked = false;
 
-            if (userId && mongoose.Types.ObjectId.isValid(userId)) {
+            if (resolvedUserId) {
                   const userStatus = await UserStatus.findOne({
-                        $or: [{ user: userId }, { userId: userId }],
+                        $or: [{ user: resolvedUserId }, { userId: resolvedUserId }],
                   });
                   if (userStatus && Array.isArray(userStatus.userLikePosts)) {
                         postObj.isLiked = userStatus.userLikePosts.some((item) => {
@@ -175,14 +196,23 @@ export const getParticularPost = async (req, res, next) => {
 export const getLikeToPost = async (req, res, next) => {
       try {
             const postId = req.params.id || req.params.postId || req.body.postId || req.query.postId;
-            const userId = req.user?._id || req.body.userId || req.query.userId;
+            let userId = req.user?._id;
+            if (!userId && (req.body.userId || req.query.userId)) {
+                  const inputId = req.body.userId || req.query.userId;
+                  if (mongoose.Types.ObjectId.isValid(inputId)) {
+                        userId = inputId;
+                  } else {
+                        const u = await User.findOne({ username: inputId });
+                        if (u) userId = u._id;
+                  }
+            }
 
             if (!postId || !mongoose.Types.ObjectId.isValid(postId)) {
                   return next ? next(errorHandler(400, "Valid Post ID is required")) : res.status(400).json({ success: false, message: "Valid Post ID is required" });
             }
 
-            if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
-                  return next ? next(errorHandler(400, "Valid User ID is required")) : res.status(400).json({ success: false, message: "Valid User ID is required" });
+            if (!userId) {
+                  return next ? next(errorHandler(400, "Valid User ID or username is required")) : res.status(400).json({ success: false, message: "Valid User ID or username is required" });
             }
 
             const post = await Post.findById(postId);

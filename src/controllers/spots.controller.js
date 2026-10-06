@@ -167,9 +167,9 @@ const aiVerification = async (req, verificationData, savedSpotId, action = "mark
                         if (isVerified) {
                               try {
                                     const populatedSpot = await MarkedSpot.findById(savedSpotId)
-                                          .populate("markedBy", "_id username avatar role email")
-                                          .populate("isAssignedBy.assignedBy", "_id username avatar role email")
-                                          .populate("isCompletedBy.completedBy", "_id username avatar role email");
+                                          .populate("markedBy", "username avatar role email")
+                                          .populate("isAssignedBy.assignedBy", "username avatar role email")
+                                          .populate("isCompletedBy.completedBy", "username avatar role email");
 
                                     if (action === "completed") {
                                           getIo().emit("spot:completed", {
@@ -185,10 +185,14 @@ const aiVerification = async (req, verificationData, savedSpotId, action = "mark
                               }
                         }
 
+                        const userDoc = userId ? await User.findById(userId).select("username") : null;
+                        const targetUsername = userDoc?.username || "";
+
                         // Emit real-time notification event targeted specifically for the user
                         const toastPayload = {
                               spotId: savedSpotId,
-                              userId: userId ? userId.toString() : "",
+                              userId: targetUsername,
+                              username: targetUsername,
                               action: action,
                               isVerified: isVerified,
                               isCompletedVerify: "completed",
@@ -205,6 +209,9 @@ const aiVerification = async (req, verificationData, savedSpotId, action = "mark
                         };
 
                         try {
+                              if (targetUsername) {
+                                    getIo().to(`user:${targetUsername}`).to(targetUsername).emit("spot:ai-verified", toastPayload);
+                              }
                               if (userId) {
                                     getIo().to(`user:${userId}`).to(String(userId)).emit("spot:ai-verified", toastPayload);
                               }
@@ -304,7 +311,7 @@ export const markSpot = async (req, res, next) => {
 
             // Populate markedBy user object so the response contains the full user details (username, avatar, role)
             const populatedSpot = await MarkedSpot.findById({ _id: newSpot._id })
-                  .populate("markedBy", "_id username avatar role email");
+                  .populate("markedBy", "username avatar role email");
 
             // Calculate rewards, badges, streaks & leaderboard rank in parallel background task (non-blocking)
 
@@ -422,9 +429,9 @@ export const getMarkedSpots = async (req, res, next) => {
 
             const [spots, totalCount] = await Promise.all([
                   MarkedSpot.find(query)
-                        .populate("markedBy", "_id username avatar role email")
-                        .populate("isAssignedBy.assignedBy", "_id username avatar role email")
-                        .populate("isCompletedBy.completedBy", "_id username avatar role email")
+                        .populate("markedBy", "username avatar role email")
+                        .populate("isAssignedBy.assignedBy", "username avatar role email")
+                        .populate("isCompletedBy.completedBy", "username avatar role email")
                         .sort({ markedAt: -1 })
                         .skip(skip)
                         .limit(limitNum),
@@ -446,9 +453,9 @@ export const getMarkedSpots = async (req, res, next) => {
             }
 
             const sanitizedSpots = spots.map((spotDoc) => {
-                  const spotObj = spotDoc.toObject ? spotDoc.toObject() : { ...spotDoc };
-                  const markedById = spotObj.markedBy?._id ? spotObj.markedBy._id.toString() : spotObj.markedBy?.toString();
+                  const markedById = spotDoc.markedBy?._id ? spotDoc.markedBy._id.toString() : spotDoc.markedBy?.toString();
                   const isOwner = Boolean(requesterId && markedById && requesterId === markedById);
+                  const spotObj = spotDoc.toObject ? spotDoc.toObject() : { ...spotDoc };
 
                   if (!isOwner) {
                         delete spotObj.isAiVerified;
@@ -501,18 +508,18 @@ export const getMarkedSpot = async (req, res, next) => {
             }
 
             const spot = await MarkedSpot.findById(spotId)
-                  .populate("markedBy", "_id username avatar role email")
-                  .populate("isAssignedBy.assignedBy", "_id username avatar role email")
-                  .populate("isCompletedBy.completedBy", "_id username avatar role email");
+                  .populate("markedBy", "username avatar role email")
+                  .populate("isAssignedBy.assignedBy", "username avatar role email")
+                  .populate("isCompletedBy.completedBy", "username avatar role email");
 
             if (!spot) {
                   return next(errorHandler(404, "Marked spot not found"));
             }
 
             const requesterId = getRequesterUserId(req);
-            const spotObj = spot.toObject ? spot.toObject() : { ...spot };
-            const markedById = spotObj.markedBy?._id ? spotObj.markedBy._id.toString() : spotObj.markedBy?.toString();
+            const markedById = spot.markedBy?._id ? spot.markedBy._id.toString() : (spot.markedBy ? spot.markedBy.toString() : "");
             const isOwner = Boolean(requesterId && markedById && requesterId === markedById);
+            const spotObj = spot.toObject ? spot.toObject() : { ...spot };
 
             if (!isOwner && !spotObj.isVerified) {
                   return next(errorHandler(404, "Marked spot not found"));
@@ -918,8 +925,8 @@ export const assignSpot = async (req, res, next) => {
 
             // Re-populate so response includes full assignment details
             const populatedSpot = await MarkedSpot.findById(spotId)
-                  .populate("markedBy", "_id username avatar role email")
-                  .populate("isAssignedBy.assignedBy", "_id username avatar role email");
+                  .populate("markedBy", "username avatar role email")
+                  .populate("isAssignedBy.assignedBy", "username avatar role email");
 
             try {
                   getIo().emit("spot:assigned", {
@@ -1199,9 +1206,9 @@ const newFunction = async (userId, spotId, oneTimeRecordId, action) => {
             // })();
 
             const populatedCompletedSpot = await MarkedSpot.findById(spot._id)
-                  .populate("markedBy", "_id username avatar role email")
-                  .populate("isAssignedBy.assignedBy", "_id username avatar role email")
-                  .populate("isCompletedBy.completedBy", "_id username avatar role email");
+                  .populate("markedBy", "username avatar role email")
+                  .populate("isAssignedBy.assignedBy", "username avatar role email")
+                  .populate("isCompletedBy.completedBy", "username avatar role email");
 
             try {
                   getIo().emit("spot:completed", {
@@ -1255,17 +1262,22 @@ export const rateSpot = async (req, res, next) => {
 
 export const getRandomGestureVerification = async (req, res, next) => {
       try {
-            const userId = req.body?.userId || req.user?._id?.toString() || req.user?.id;
-            const { coordinates, markspotid, spotId } = req.body;
-
-            if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
-                  return next(errorHandler(400, "Invalid user ID"));
+            let isValidUser = req.user;
+            const bodyUserId = req.body?.userId;
+            if (!isValidUser && bodyUserId) {
+                  if (mongoose.Types.ObjectId.isValid(bodyUserId)) {
+                        isValidUser = await User.findById(bodyUserId);
+                  }
+                  if (!isValidUser) {
+                        isValidUser = await User.findOne({ username: bodyUserId });
+                  }
             }
 
-            const isValidUser = await User.findById(userId);
             if (!isValidUser) {
                   return next(errorHandler(404, "User not found"));
             }
+            const userId = isValidUser._id;
+            const { coordinates, markspotid, spotId } = req.body;
 
 
             const imageUrl = await getImageFRomCLoudinary();
@@ -1376,17 +1388,22 @@ export const getRandomGestureVerification = async (req, res, next) => {
 
 export const getRandomCodeVerification = async (req, res, next) => {
       try {
-            const userId = req.body?.userId || req.user?._id?.toString() || req.user?.id;
-            const { coordinates, markspotid, spotId } = req.body;
-
-            if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
-                  return next(errorHandler(400, "Invalid user ID"));
+            let isValidUser = req.user;
+            const bodyUserId = req.body?.userId;
+            if (!isValidUser && bodyUserId) {
+                  if (mongoose.Types.ObjectId.isValid(bodyUserId)) {
+                        isValidUser = await User.findById(bodyUserId);
+                  }
+                  if (!isValidUser) {
+                        isValidUser = await User.findOne({ username: bodyUserId });
+                  }
             }
 
-            const isValidUser = await User.findById(userId);
             if (!isValidUser) {
                   return next(errorHandler(404, "User not found"));
             }
+            const userId = isValidUser._id;
+            const { coordinates, markspotid, spotId } = req.body;
             const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
             const randomCode = Array.from(crypto.randomBytes(4), (b) => chars[b % chars.length]).join("");
             const action = req.body?.action || req.body?.target || "mark";
