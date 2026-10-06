@@ -9,6 +9,8 @@ import { google } from "googleapis";
 import { generateOTP } from "../../utils/otpGenerator.utils.js";
 import { uploadToCloudinary } from "../../utils/Cloudinaryimage.utils.js";
 
+const isProduction = NODE_ENV === 'production' || process.env.NODE_ENV === 'production';
+
 const setAuthCookie = (res, user) => {
       const token = jwt.sign(
             { userId: user._id, role: user.role, isProfileCompleted: true, provider: user.Accprovider },
@@ -18,9 +20,10 @@ const setAuthCookie = (res, user) => {
       console.log("Token set", token);
       res.cookie("token", token, {
             httpOnly: true,
-            secure: NODE_ENV === 'production',
-            sameSite: NODE_ENV === 'production' ? 'none' : 'lax',
-            maxAge: 7 * 24 * 60 * 60 * 1000
+            secure: isProduction,
+            sameSite: isProduction ? 'none' : 'lax',
+            maxAge: 7 * 24 * 60 * 60 * 1000,
+            path: '/'
       });
 };
 
@@ -33,18 +36,19 @@ const setUncompletedProfileCookie = (res, user) => {
       console.log("Token set", token);
       res.cookie("token", token, {
             httpOnly: true,
-            secure: NODE_ENV === 'production',
-            sameSite: NODE_ENV === 'production' ? 'none' : 'lax',
-            maxAge: 7 * 24 * 60 * 60 * 1000
+            secure: isProduction,
+            sameSite: isProduction ? 'none' : 'lax',
+            maxAge: 7 * 24 * 60 * 60 * 1000,
+            path: '/'
       });
 };
 
 const LogoutCookie = (res) => {
       res.clearCookie('token', {
             httpOnly: true,
-            secure: NODE_ENV === 'production',
-            sameSite: NODE_ENV === 'production' ? 'none' : 'lax',
-            path: '/' // default is '/', ensure it matches the path used during login
+            secure: isProduction,
+            sameSite: isProduction ? 'none' : 'lax',
+            path: '/'
       });
 }
 

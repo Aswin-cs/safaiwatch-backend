@@ -11,6 +11,7 @@ import MarkedSpot from "../models/markedSpots.model.js";
 import oneTimeModel from "../models/one-time.model.js";
 
 const app = express();
+app.set('trust proxy', 1);
 
 nodeCron.schedule("*/5 * * * *", async () => {
   try {
