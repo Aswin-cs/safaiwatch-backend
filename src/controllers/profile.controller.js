@@ -263,14 +263,22 @@ export const getMyProfile = async (req, res, next) => {
                   };
             });
 
+            const isHybrid = userRole === "hybrid";
+            const isCoordinator = userRole === "coordinator";
+            const isCivilian = userRole === "civilian" || (!isHybrid && !isCoordinator);
+
+            const canViewMarked = isHybrid || isCivilian;
+            const canViewAssigned = isHybrid || isCoordinator;
+            const canViewCompleted = isHybrid || isCoordinator;
+
             let userCases = [];
 
-            if (userRole === "civilian") {
-                  userCases = [...markedCaseItems, ...completedCaseItems];
-            } else if (userRole === "coordinator") {
-                  userCases = [...assignedCaseItems, ...completedCaseItems, ...markedCaseItems];
-            } else {
+            if (isCoordinator) {
+                  userCases = [...assignedCaseItems, ...completedCaseItems];
+            } else if (isHybrid) {
                   userCases = [...markedCaseItems, ...assignedCaseItems, ...completedCaseItems];
+            } else {
+                  userCases = [...markedCaseItems];
             }
 
             const userLedger = [
@@ -361,15 +369,15 @@ export const getMyProfile = async (req, res, next) => {
                         selectedRewards: userRewards?.selectedRewards ?? [],
                   },
                   userStatus: {
-                        reportedSpots: allMarkedSpots.length,
-                        completedSpots: allCompletedSpots.length,
-                        activeSpots: assignedCaseItems.length,
-                        pendingSpots: markedCaseItems.filter((c) => c.status === "in_progress").length,
-                        totalSpots: allMarkedSpots.length,
+                        reportedSpots: canViewMarked ? allMarkedSpots.length : 0,
+                        completedSpots: canViewCompleted ? allCompletedSpots.length : 0,
+                        activeSpots: canViewAssigned ? assignedCaseItems.length : 0,
+                        pendingSpots: canViewMarked ? markedCaseItems.filter((c) => c.status === "in_progress").length : 0,
+                        totalSpots: canViewMarked ? allMarkedSpots.length : 0,
                         streaks: currentStreak,
-                        markedSpotsList: markedCaseItems,
-                        assignedSpotsList: assignedCaseItems,
-                        completedSpotsList: completedCaseItems,
+                        markedSpotsList: canViewMarked ? markedCaseItems : [],
+                        assignedSpotsList: canViewAssigned ? assignedCaseItems : [],
+                        completedSpotsList: canViewCompleted ? completedCaseItems : [],
                         cases: userCases,
                   },
             });
@@ -641,14 +649,22 @@ export const getProfileByUsername = async (req, res, next) => {
                   return markedItem;
             });
 
+            const isHybrid = userRole === "hybrid";
+            const isCoordinator = userRole === "coordinator";
+            const isCivilian = userRole === "civilian" || (!isHybrid && !isCoordinator);
+
+            const canViewMarked = isHybrid || isCivilian;
+            const canViewAssigned = isHybrid || isCoordinator;
+            const canViewCompleted = isHybrid || isCoordinator;
+
             let userCases = [];
 
-            if (userRole === "civilian") {
-                  userCases = [...markedCaseItems, ...completedCaseItems];
-            } else if (userRole === "coordinator") {
-                  userCases = [...assignedCaseItems, ...completedCaseItems, ...markedCaseItems];
-            } else {
+            if (isCoordinator) {
+                  userCases = [...assignedCaseItems, ...completedCaseItems];
+            } else if (isHybrid) {
                   userCases = [...markedCaseItems, ...assignedCaseItems, ...completedCaseItems];
+            } else {
+                  userCases = [...markedCaseItems];
             }
 
             const weekDays = getWeekDays(userRewards?.activeDays, userStatus);
@@ -699,15 +715,15 @@ export const getProfileByUsername = async (req, res, next) => {
                         selectedRewards: userRewards?.selectedRewards ?? [],
                   },
                   userStatus: {
-                        reportedSpots: allMarkedSpots.length,
-                        completedSpots: allCompletedSpots.length,
-                        activeSpots: assignedCaseItems.length,
-                        pendingSpots: markedCaseItems.filter((c) => c.status === "in_progress").length,
-                        totalSpots: allMarkedSpots.length,
+                        reportedSpots: canViewMarked ? allMarkedSpots.length : 0,
+                        completedSpots: canViewCompleted ? allCompletedSpots.length : 0,
+                        activeSpots: canViewAssigned ? assignedCaseItems.length : 0,
+                        pendingSpots: canViewMarked ? markedCaseItems.filter((c) => c.status === "in_progress").length : 0,
+                        totalSpots: canViewMarked ? allMarkedSpots.length : 0,
                         streaks: currentStreak,
-                        markedSpotsList: markedCaseItems,
-                        assignedSpotsList: assignedCaseItems,
-                        completedSpotsList: completedCaseItems,
+                        markedSpotsList: canViewMarked ? markedCaseItems : [],
+                        assignedSpotsList: canViewAssigned ? assignedCaseItems : [],
+                        completedSpotsList: canViewCompleted ? completedCaseItems : [],
                         cases: userCases,
                   },
             });

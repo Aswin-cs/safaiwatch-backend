@@ -13,6 +13,7 @@ import {
       deleteOneTimeVerification,
 } from "../controllers/spots.controller.js";
 import { authorize } from "../middlewares/authorize.middleware.js";
+import { verifySpotLocation } from "../middlewares/location.middleware.js";
 import multer from "multer";
 
 const storage = multer.memoryStorage();
@@ -49,7 +50,13 @@ spotsRouter.delete("/one-time/:id", authorize(), deleteOneTimeVerification);
 
 // Status transition routes
 spotsRouter.patch("/:id/assign", authorize(), assignSpot);
-spotsRouter.patch("/:id/complete", authorize(), upload.single("imageAfter"), completeSpot);
+spotsRouter.patch(
+      "/:id/complete",
+      authorize("Hybrid", "Coordinator", "hybrid", "coordinator"),
+      upload.single("imageAfter"),
+      verifySpotLocation(5),
+      completeSpot
+);
 spotsRouter.patch("/:id/rate", authorize(), rateSpot);
 
 export default spotsRouter;

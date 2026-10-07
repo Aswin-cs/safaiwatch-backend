@@ -77,10 +77,6 @@ const userStatusSchema = new mongoose.Schema({
                               type: mongoose.Schema.Types.ObjectId,
                               ref: 'MarkedSpot'
                         },
-                        // deletedBy: {
-                        //       type: mongoose.Schema.Types.ObjectId,
-                        //       ref: 'User'
-                        // },
                         deletedAt: {
                               type: Date,
                               default: Date.now
@@ -96,11 +92,6 @@ const userStatusSchema = new mongoose.Schema({
                               type: mongoose.Schema.Types.ObjectId,
                               ref: 'MarkedSpot'
                         },
-                        // assignedBy: {
-                        //       type: mongoose.Schema.Types.ObjectId,
-                        //       ref: 'User',
-                        //       required: true
-                        // },
                         karmaPoints: {
                               type: Number,
                               default: 0
