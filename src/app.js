@@ -33,10 +33,10 @@ nodeCron.schedule("*/5 * * * *", async () => {
         }
       ]
     });
-    await oneTimeModel.deleteMany({
+    const hello = await oneTimeModel.deleteMany({
       expirationDate: { $lt: now }
     });
-    console.log("Old one-time codes deleted successfully");
+    console.log("Old one-time codes deleted successfully", hello);
   } catch (error) {
     console.error("Error deleting old one-time codes:", error);
   }

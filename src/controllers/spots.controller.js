@@ -129,6 +129,22 @@ const aiVerification = async (req, verificationData, savedSpotId, action = "mark
                                     isCompletedVerifyAt: new Date(),
                                     isAiVerified: aiVerifiedData,
                               });
+                              const userStatus = await UserStatus.findOne({
+                                    user: userId,
+                              }).session(session);
+                              const karmaPoints = isVerified
+                                    ? (finalCritical === "High" || finalCritical === "Very High")
+                                          ? 20
+                                          : finalCritical === "Medium"
+                                                ? 10
+                                                : 5
+                                    : 0;
+
+                              userStatus.MarkedSpots.push({
+                                    _id: isVerified.id,
+                                    karmaPoints: karmaPoints,
+                                    markedAt: newSpot.markedAt,
+                              });
                         }
                         else if (action === "completed" && isVerified) {
                               await newFunction(userId, savedSpotId, oneTimeRecordId, action);
@@ -296,11 +312,7 @@ export const markSpot = async (req, res, next) => {
                   coordinates: userCoords,
             };
 
-            userStatus.MarkedSpots.push({
-                  _id: isVerified.id,
-                  karmaPoints: (finalCritical === "High" || finalCritical === "Very High") ? 20 : finalCritical === "Medium" ? 10 : 5,
-                  markedAt: newSpot.markedAt,
-            });
+
 
             userStatus.pendingCount = (userStatus.pendingCount || 0) + 1;
             userStatus.totalCount = (userStatus.totalCount || 0) + 1;
@@ -479,6 +491,19 @@ export const getMarkedSpots = async (req, res, next) => {
                         spotObj.oneTimeVerificationId = null;
                   }
 
+                  const isReportedByRequestedUser = Boolean(
+                        requesterId &&
+                        Array.isArray(spotDoc.isReportedBy) &&
+                        spotDoc.isReportedBy.some((item) => {
+                              const rId = item?.reportedBy?._id
+                                    ? item.reportedBy._id.toString()
+                                    : item?.reportedBy?.toString();
+                              return rId && rId === requesterId;
+                        })
+                  );
+                  spotObj.hasUserReported = isReportedByRequestedUser;
+                  spotObj.isReportedByRequestedUser = isReportedByRequestedUser;
+
                   return spotObj;
             });
 
@@ -556,6 +581,19 @@ export const getMarkedSpot = async (req, res, next) => {
                   spotObj.verificationStatus = null;
                   spotObj.oneTimeVerificationId = null;
             }
+
+            const isReportedByRequestedUser = Boolean(
+                  requesterId &&
+                  Array.isArray(spot.isReportedBy) &&
+                  spot.isReportedBy.some((item) => {
+                        const rId = item?.reportedBy?._id
+                              ? item.reportedBy._id.toString()
+                              : item?.reportedBy?.toString();
+                        return rId && rId === requesterId;
+                  })
+            );
+            spotObj.hasUserReported = isReportedByRequestedUser;
+            spotObj.isReportedByRequestedUser = isReportedByRequestedUser;
 
             return responseHandler(res, 200, "Spot retrieved successfully", {
                   spot: spotObj,
@@ -981,6 +1019,15 @@ export const completeSpot = async (req, res, next) => {
                   return next(errorHandler(403, "Forbidden: Only assigned users can clean or complete this spot. You must first claim/assign yourself to this spot."));
             }
 
+            // Disallow completion if the user previously reported/contested this spot
+            const hasUserReported = (spot.isReportedBy || []).some((entry) => {
+                  const rId = entry?.reportedBy?._id ? entry.reportedBy._id.toString() : entry?.reportedBy?.toString();
+                  return rId && rId === userId.toString();
+            });
+            if (hasUserReported) {
+                  return next(errorHandler(400, "You have already reported/contested this spot and cannot complete it."));
+            }
+
             // Check and consume pre-verification code or gesture if provided
             let isVerified = null;
             if (
@@ -1193,18 +1240,6 @@ const newFunction = async (userId, spotId, oneTimeRecordId, action) => {
             await session.commitTransaction();
             await session.endSession();
 
-            // // Calculate rewards, badges, streaks & leaderboard rank in parallel background task (non-blocking)
-            // (async () => {
-            //       try {
-            //             await rewardsCalculating(userId, { markedSpotId: spot._id }, "completed");
-            //             await streaksCalculated({ user_id: userId });
-            //             await badgesCalculating({ user_id: userId });
-            //             await leaderboardRankCalculated({ user_id: userId });
-            //       } catch (rewardErr) {
-            //             console.error("Background reward calculation error in completeSpot:", rewardErr);
-            //       }
-            // })();
-
             const populatedCompletedSpot = await MarkedSpot.findById(spot._id)
                   .populate("markedBy", "username avatar role email")
                   .populate("isAssignedBy.assignedBy", "username avatar role email")
@@ -1291,8 +1326,11 @@ export const getRandomGestureVerification = async (req, res, next) => {
             }
             const expirationDate = new Date(Date.now() + 5 * 60 * 1000);
 
-            // 1. Action "complete" -> Stores in OneTime model
-            if (action === "complete") {
+            const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+            const randomCode = Array.from(crypto.randomBytes(4), (b) => chars[b % chars.length]).join("");
+
+            // 1. Action "complete" / "contest" / "reportSpot" -> Stores in OneTime model
+            if (action === "complete" || action === "reportSpot" || action === "contest" || action === "report") {
                   const targetSpotId = markspotid || spotId || req.body?.markspotid || req.body?.spotId || req.params?.id || req.body?.id || req.query?.markspotid || req.query?.spotId || req.query?.id;
                   if (!targetSpotId || !mongoose.Types.ObjectId.isValid(targetSpotId)) {
                         return next(errorHandler(400, "Valid spot ID is required for completion verification"));
@@ -1302,7 +1340,7 @@ export const getRandomGestureVerification = async (req, res, next) => {
                   if (!targetSpot) {
                         return next(errorHandler(404, "Spot not found"));
                   }
-                  if (targetSpot.isCompleted) {
+                  if (targetSpot.isCompleted && action === "complete") {
                         return next(errorHandler(400, "Spot has already been completed"));
                   }
 
@@ -1312,8 +1350,12 @@ export const getRandomGestureVerification = async (req, res, next) => {
                               $set: {
                                     user: userId,
                                     markspotid: targetSpotId,
+                                    forWhat: action === "complete" ? "completeSpot" : "reportSpot",
                                     guestureImage: imageUrl,
                                     expirationDate,
+                              },
+                              $setOnInsert: {
+                                    code: randomCode,
                               }
                         },
                         { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }
@@ -1328,7 +1370,8 @@ export const getRandomGestureVerification = async (req, res, next) => {
                   return responseHandler(res, 200, "Random gesture verification generated successfully", {
                         imageId: oneTimeVerification._id,
                         verificationId: oneTimeVerification._id,
-                        imageUrl,
+                        imageUrl: oneTimeVerification.guestureImage || imageUrl,
+                        code: oneTimeVerification.code || randomCode,
                   });
             }
 
@@ -1360,6 +1403,10 @@ export const getRandomGestureVerification = async (req, res, next) => {
                                     isCodeOrGestureVerified: false,
                                     expectedCompletionDate: expirationDate,
                               },
+                        },
+                        $setOnInsert: {
+                              verificationCode: randomCode,
+                              "preCodeOrGestureForMark.verificationCode": randomCode,
                         }
                   },
                   { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }
@@ -1378,7 +1425,8 @@ export const getRandomGestureVerification = async (req, res, next) => {
             return responseHandler(res, 200, "Random gesture verification generated successfully", {
                   imageId: randomVerification._id,
                   verificationId: randomVerification._id,
-                  imageUrl,
+                  imageUrl: randomVerification.verificationGesture || imageUrl,
+                  code: randomVerification.verificationCode || randomCode,
             });
       } catch (error) {
             console.error("Error in getRandomGestureVerification:", error);
@@ -1412,8 +1460,8 @@ export const getRandomCodeVerification = async (req, res, next) => {
             }
             const expirationDate = new Date(Date.now() + 5 * 60 * 1000);
 
-            // 1. Action "complete" -> Stores in OneTime model
-            if (action === "complete") {
+            // 1. Action "complete" / "contest" / "reportSpot" -> Stores in OneTime model
+            if (action === "complete" || action === "reportSpot" || action === "contest" || action === "report") {
                   const targetSpotId = markspotid || spotId || req.body?.markspotid || req.body?.spotId || req.params?.id || req.body?.id || req.query?.markspotid || req.query?.spotId || req.query?.id;
                   if (!targetSpotId || !mongoose.Types.ObjectId.isValid(targetSpotId)) {
                         return next(errorHandler(400, "Valid spot ID is required for completion verification"));
@@ -1423,7 +1471,7 @@ export const getRandomCodeVerification = async (req, res, next) => {
                   if (!targetSpot) {
                         return next(errorHandler(404, "Spot not found"));
                   }
-                  if (targetSpot.isCompleted) {
+                  if (targetSpot.isCompleted && action === "complete") {
                         return next(errorHandler(400, "Spot has already been completed"));
                   }
 
@@ -1434,8 +1482,9 @@ export const getRandomCodeVerification = async (req, res, next) => {
                                     user: userId,
                                     markspotid: targetSpotId,
                                     code: randomCode,
+                                    forWhat: action === "complete" ? "completeSpot" : "reportSpot",
                                     expirationDate,
-                              }
+                              },
                         },
                         { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }
                   );
@@ -1447,8 +1496,10 @@ export const getRandomCodeVerification = async (req, res, next) => {
                   });
 
                   return responseHandler(res, 200, "Random code verification generated successfully", {
+                        imageId: oneTimeVerification._id,
                         verificationId: oneTimeVerification._id,
                         code: randomCode,
+                        imageUrl: oneTimeVerification.guestureImage || "",
                   });
             }
 
@@ -1469,6 +1520,10 @@ export const getRandomCodeVerification = async (req, res, next) => {
                               markedBy: userId,
                               coordinates,
                               markedAt: new Date(),
+                              expectedCompletionDate: expirationDate,
+                              verificationtype: "code",
+                              verificationCode: randomCode,
+                              isUserCompleted: false,
                               preCodeOrGestureForMark: {
                                     isUserCompleted: false,
                                     verificationtype: "code",
@@ -1476,7 +1531,8 @@ export const getRandomCodeVerification = async (req, res, next) => {
                                     isCodeOrGestureVerified: false,
                                     expectedCompletionDate: expirationDate,
                               },
-                        }
+                        },
+
                   },
                   { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }
             );
@@ -1491,8 +1547,10 @@ export const getRandomCodeVerification = async (req, res, next) => {
             });
 
             return responseHandler(res, 200, "Random code verification generated successfully", {
+                  imageId: randomVerification._id,
                   verificationId: randomVerification._id,
                   code: randomCode,
+                  imageUrl: randomVerification.verificationGesture || randomVerification.preCodeOrGestureForMark?.verificationGesture || "",
             });
       } catch (error) {
             console.error("Error in getRandomCodeVerification:", error);
@@ -1527,8 +1585,16 @@ export const preImageOrCodeVerification = async (req, target = "mark") => {
             throw errorHandler(400, "Coordinator cannot perform this action");
       }
 
-      // 1. Completion Action: Verify against OneTime model
-      if (target === "complete" || req.body?.action == "complete") {
+      // 1. Completion / Contest / Report Action: Verify against OneTime model
+      if (
+            target === "complete" ||
+            target === "report" ||
+            target === "contest" ||
+            req.body?.action === "complete" ||
+            req.body?.action === "reportSpot" ||
+            req.body?.action === "contest" ||
+            req.body?.action === "report"
+      ) {
             const oneTimeDoc = await oneTimeModel.findById(verificationId);
             if (!oneTimeDoc) {
                   throw errorHandler(404, "Invalid or expired completion verification ID");
@@ -1549,14 +1615,21 @@ export const preImageOrCodeVerification = async (req, target = "mark") => {
                   _id: { $ne: oneTimeDoc._id }
             });
 
-            const vType = oneTimeDoc.code ? "code" : "gesture";
-            const vVal = oneTimeDoc.code || oneTimeDoc.guestureImage;
+            const mode = req.body?.verificationMode || req.body?.mode;
+            const vType = mode === "code" || (!mode && oneTimeDoc.code && !oneTimeDoc.guestureImage)
+                  ? "code"
+                  : "gesture";
+            const vVal = vType === "code"
+                  ? (oneTimeDoc.code || oneTimeDoc.guestureImage)
+                  : (oneTimeDoc.guestureImage || oneTimeDoc.code);
 
             return {
                   data: vVal,
                   type: vType,
                   id: oneTimeDoc.markspotid || oneTimeDoc._id,
                   verificationId: oneTimeDoc._id,
+                  code: oneTimeDoc.code,
+                  gesture: oneTimeDoc.guestureImage,
             };
       }
 
@@ -1595,15 +1668,22 @@ export const preImageOrCodeVerification = async (req, target = "mark") => {
             }
       );
 
-      const vType = markData.verificationtype || markedSpot.verificationtype;
+      const mode = req.body?.verificationMode || req.body?.mode;
+      const vType = mode === "code"
+            ? "code"
+            : (mode === "hand" || mode === "gesture"
+                  ? "gesture"
+                  : (markData.verificationtype || markedSpot.verificationtype || "gesture"));
       const vVal = vType === "gesture"
-            ? (markData.verificationGesture || markedSpot.verificationGesture)
-            : (markData.verificationCode || markedSpot.verificationCode);
+            ? (markData.verificationGesture || markedSpot.verificationGesture || markData.verificationCode || markedSpot.verificationCode)
+            : (markData.verificationCode || markedSpot.verificationCode || markData.verificationGesture || markedSpot.verificationGesture);
 
       return {
             data: vVal,
             type: vType,
             id: markedSpot._id,
+            code: markData.verificationCode || markedSpot.verificationCode,
+            gesture: markData.verificationGesture || markedSpot.verificationGesture,
       };
 };
 

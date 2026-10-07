@@ -12,6 +12,7 @@ import {
       getRandomCodeVerification,
       deleteOneTimeVerification,
 } from "../controllers/spots.controller.js";
+import { reportOnContestSpot } from "../controllers/report.controller.js";
 import { authorize } from "../middlewares/authorize.middleware.js";
 import { verifySpotLocation } from "../middlewares/location.middleware.js";
 import multer from "multer";
@@ -59,4 +60,10 @@ spotsRouter.patch(
 );
 spotsRouter.patch("/:id/rate", authorize(), rateSpot);
 
+// Dispute & Contest Report routes
+spotsRouter.post("/:id/report", authorize(), upload.any(), reportOnContestSpot);
+spotsRouter.post("/:id/contest", authorize(), upload.any(), reportOnContestSpot);
+spotsRouter.post("/report", authorize(), upload.any(), reportOnContestSpot);
+
 export default spotsRouter;
+

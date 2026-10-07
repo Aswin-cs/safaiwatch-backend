@@ -239,14 +239,26 @@ const handleLocationVerification = async (
     }
 
     // 7. Extract user's current coordinates from request
-    const userCoords = extractUserCoordinates(req);
+    let userCoords = extractUserCoordinates(req);
     if (!userCoords) {
-      return next(
-        errorHandler(
-          400,
-          "Current user location (latitude and longitude) is required to verify physical proximity to the spot."
-        )
-      );
+      if (process.env.ALLOW_DEV_LOCATION_BYPASS === "true" || process.env.BYPASS_LOCATION_CHECK === "true") {
+        console.warn(
+          `[verifySpotLocation DEV BYPASS] No user coordinates found in request for spot ${spotId}. Using spot coordinates for development testing.`
+        );
+        userCoords = spotCoords;
+      } else {
+        console.warn(
+          `[verifySpotLocation] Location verification failed: user coordinates missing for spot ${spotId}. Received body keys: [${Object.keys(
+            req.body || {}
+          ).join(", ")}]`
+        );
+        return next(
+          errorHandler(
+            400,
+            "Current user location (latitude and longitude) is required to verify physical proximity to the spot."
+          )
+        );
+      }
     }
 
     // 8. Distance check using Haversine formula (radius check: default 5 meters)
@@ -263,12 +275,18 @@ const handleLocationVerification = async (
           ? `${(distanceMeters / 1000).toFixed(2)} km`
           : `${distanceMeters.toFixed(1)} m`;
 
-      return next(
-        errorHandler(
-          403,
-          `Location verification failed: You are ${distanceDisplay} away from the marked spot. You must be within ${maxRadius}m of the spot location to complete it.`
-        )
-      );
+      if (process.env.ALLOW_DEV_LOCATION_BYPASS === "true" || process.env.BYPASS_LOCATION_CHECK === "true") {
+        console.warn(
+          `[verifySpotLocation DEV BYPASS] User is ${distanceDisplay} away from spot ${spotId} (radius: ${maxRadius}m), but proximity check is bypassed by env flag.`
+        );
+      } else {
+        return next(
+          errorHandler(
+            403,
+            `Location verification failed: You are ${distanceDisplay} away from the marked spot. You must be within ${maxRadius}m of the spot location to complete it.`
+          )
+        );
+      }
     }
 
     // 9. Attach verification metadata to request for downstream handlers

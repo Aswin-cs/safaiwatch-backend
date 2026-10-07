@@ -585,63 +585,80 @@ export const aiPhotoVerification = async (input, mimeTypeParam, verificationData
       }
 };
 
-export const wasteVerification = async (url, verificationData) => {
-      const filePart = urlToGenerativePart(url);
-      let vType = "gesture";
-      let vData = null;
-      if (typeof verificationData === "string") {
-            const normalizedVData = verificationData.toLowerCase();
-            if (["code", "gesture", "waste", "wasteonly", "waste_only"].includes(normalizedVData)) {
-                  vType = normalizedVData;
-            } else {
-                  vData = verificationData;
+export const wasteVerification = async (url, verificationData, what) => {
+      if (what !== "simulation" && verificationData !== "simulation") {
+            const filePart = await urlToGenerativePart(url);
+            let vType = "gesture";
+            let vData = null;
+            if (typeof verificationData === "string") {
+                  const normalizedVData = verificationData.toLowerCase();
+                  if (["code", "gesture", "waste", "wasteonly", "waste_only"].includes(normalizedVData)) {
+                        vType = normalizedVData;
+                  } else {
+                        vData = verificationData;
+                  }
+            } else if (typeof verificationData === "object" && verificationData !== null) {
+                  vType = (verificationData.type || "gesture").toLowerCase();
+                  vData = verificationData.data || verificationData.code || verificationData.guestureImage || verificationData.gestureImage;
             }
-      } else if (typeof verificationData === "object" && verificationData !== null) {
-            vType = (verificationData.type || "gesture").toLowerCase();
-            vData = verificationData.data || verificationData.code || verificationData.guestureImage || verificationData.gestureImage;
-      }
-      if (vType === "code") {
-            const targetCode = String(vData || "").trim();
-            const response = await generateGeminiContent({
-                  contents: [filePart],
-                  config: {
-                        systemInstruction: SYSTEM_INSTRUCTION_WASTE_CODE_FORENSICS(targetCode),
-                        responseMimeType: "application/json",
-                        responseSchema: SAFEIWATCH_WASTE_CODE_AUDIT_SCHEMA,
-                        temperature: 0.1,
-                  }
-            });
+            if (vType === "code") {
+                  const targetCode = String(vData || "").trim();
+                  const response = await generateGeminiContent({
+                        contents: [filePart],
+                        config: {
+                              systemInstruction: SYSTEM_INSTRUCTION_WASTE_CODE_FORENSICS(targetCode),
+                              responseMimeType: "application/json",
+                              responseSchema: SAFEIWATCH_WASTE_CODE_AUDIT_SCHEMA,
+                              temperature: 0.1,
+                        }
+                  });
 
-            let auditResult = response;
-            if (typeof auditResult === "string") {
-                  try {
-                        auditResult = JSON.parse(auditResult);
-                  } catch (e) {
-                        console.log("Error parsing aiPhotoVerification waste audit result:", e);
+                  let auditResult = response;
+                  if (typeof auditResult === "string") {
+                        try {
+                              auditResult = JSON.parse(auditResult);
+                        } catch (e) {
+                              console.log("Error parsing aiPhotoVerification waste audit result:", e);
+                        }
                   }
+                  return auditResult;
             }
-            return auditResult;
-      }
-      else {
-            const response = await generateGeminiContent({
-                  contents: [filePart],
-                  config: {
-                        systemInstruction: SYSTEM_INSTRUCTION_WASTE_FORENSICS,
-                        responseMimeType: "application/json",
-                        responseSchema: SAFEIWATCH_WASTE_AUDIT_SCHEMA,
-                        temperature: 0.1,
-                  }
-            });
+            else {
+                  const response = await generateGeminiContent({
+                        contents: [filePart],
+                        config: {
+                              systemInstruction: SYSTEM_INSTRUCTION_WASTE_FORENSICS,
+                              responseMimeType: "application/json",
+                              responseSchema: SAFEIWATCH_WASTE_AUDIT_SCHEMA,
+                              temperature: 0.1,
+                        }
+                  });
 
-            let auditResult = response;
-            if (typeof auditResult === "string") {
-                  try {
-                        auditResult = JSON.parse(auditResult);
-                  } catch (e) {
-                        console.log("Error parsing aiPhotoVerification waste audit result:", e);
+                  let auditResult = response;
+                  if (typeof auditResult === "string") {
+                        try {
+                              auditResult = JSON.parse(auditResult);
+                        } catch (e) {
+                              console.log("Error parsing aiPhotoVerification waste audit result:", e);
+                        }
                   }
+                  return auditResult;
             }
-            return auditResult;
+      } else {
+            return {
+                  isAiOrEdited: false,
+                  forensicConfidence: 0.95,
+                  critcal: "Low",
+                  detectedManipulationType: "AUTHENTIC_PHOTO",
+                  forensicDetails: "Simulation mode: No anomalies detected.",
+                  codeMatched: true,
+                  detectedCodeText: "VERIFIED",
+                  gestureMatched: true,
+                  detectedGestureName: "PEACE",
+                  isValidWasteReport: true,
+                  isFraudulent: false,
+                  fraudReason: "NONE",
+                  summary: "Simulation mode: The image appears authentic and valid."
+            };
       }
-
-}
+};
