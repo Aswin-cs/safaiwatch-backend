@@ -165,6 +165,26 @@ const userStatusSchema = new mongoose.Schema({
             ],
             default: []
       },
+      reportForme: {
+            type: [
+                  {
+                        _id: {
+                              type: mongoose.Schema.Types.ObjectId,
+                              ref: 'Report'
+                        },
+                        forWhat: {
+                              type: String,
+
+                        },
+                        reportAt: {
+                              type: Date,
+                              default: Date.now
+                        }
+
+                  }
+            ],
+            default: []
+      },
       BlackListCount: {
             type: Number,
             default: 0

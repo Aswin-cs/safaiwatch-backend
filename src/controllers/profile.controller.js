@@ -3,6 +3,7 @@ import User from "../../models/user.model.js";
 import UserRewards from "../../models/userRewards.model.js";
 import UserStatus from "../../models/userStatus.model.js";
 import MarkedSpot from "../../models/markedSpots.model.js";
+import Report from "../../models/report.model.js";
 import Post from "../../models/feeds.model.js";
 import { errorHandler } from "../../utils/errorHandler.js";
 import { responseHandler } from "../../utils/responseHandler.js";
@@ -112,7 +113,17 @@ export const getMyProfile = async (req, res, next) => {
                   UserStatus.findOne({ $or: [{ user: userId }, { userId }] })
                         .populate({ path: "MarkedSpots._id", model: "MarkedSpot" })
                         .populate({ path: "AssignedSpots._id", model: "MarkedSpot" })
-                        .populate({ path: "CompletedSpots._id", model: "MarkedSpot" }),
+                        .populate({ path: "CompletedSpots._id", model: "MarkedSpot" })
+                        .populate({
+                              path: "reportForme._id",
+                              model: "Report",
+                              select: "forWhat reasonForSpot reasonForSpotComplete spotId description imageUrl createdAt",
+                              populate: {
+                                    path: "spotId",
+                                    model: "MarkedSpot",
+                                    select: "address description category wasteCategory image coordinates",
+                              },
+                        }),
                   MarkedSpot.find({
                         markedBy: userId,
                         "preCodeOrGestureForMark.isUserCompleted": { $ne: false },
@@ -379,6 +390,30 @@ export const getMyProfile = async (req, res, next) => {
                         assignedSpotsList: canViewAssigned ? assignedCaseItems : [],
                         completedSpotsList: canViewCompleted ? completedCaseItems : [],
                         cases: userCases,
+                        reportForme: Array.isArray(userStatus?.reportForme)
+                              ? userStatus.reportForme.map((item, idx) => {
+                                    const reportDoc = item._id && typeof item._id === "object" ? item._id : null;
+                                    const reason = reportDoc?.reasonForSpot || reportDoc?.reasonForSpotComplete || "Reported for review";
+                                    const spotDoc = reportDoc?.spotId && typeof reportDoc.spotId === "object" ? reportDoc.spotId : null;
+                                    return {
+                                          id: reportDoc?._id ? String(reportDoc._id) : `rep-${idx}`,
+                                          reportId: reportDoc?._id ? String(reportDoc._id) : (item._id ? String(item._id) : null),
+                                          forWhat: item.forWhat || reportDoc?.forWhat || "reportSpot",
+                                          reasonForSpot: reportDoc?.reasonForSpot || null,
+                                          reasonForSpotComplete: reportDoc?.reasonForSpotComplete || null,
+                                          reason,
+                                          description: reportDoc?.description || "",
+                                          imageUrl: reportDoc?.imageUrl || "",
+                                          reportAt: item.reportAt || reportDoc?.createdAt,
+                                          spot: spotDoc ? {
+                                                id: spotDoc._id ? String(spotDoc._id) : null,
+                                                address: spotDoc.address || "Reported Spot",
+                                                category: spotDoc.category || spotDoc.wasteCategory || "Civic Spot",
+                                                image: spotDoc.image || null,
+                                          } : null,
+                                    };
+                              }).sort((a, b) => new Date(b.reportAt || 0).getTime() - new Date(a.reportAt || 0).getTime())
+                              : [],
                   },
             });
       } catch (error) {
@@ -1206,6 +1241,132 @@ export const getUserRewardsHistory = async (req, res, next) => {
             });
       } catch (error) {
             console.error("Error in getUserRewardsHistory:", error);
+            return next(errorHandler(500, error.message || "Internal Server Error"));
+      }
+};
+
+export const getUserNotifications = async (req, res, next) => {
+      try {
+            const userId = req.user?._id;
+            if (!userId) {
+                  return next(errorHandler(401, "Unauthorized"));
+            }
+
+            const userStatus = await UserStatus.findOne({
+                  $or: [{ user: userId }, { userId }],
+            }).populate({
+                  path: "reportForme._id",
+                  model: "Report",
+                  select: "forWhat reasonForSpot reasonForSpotComplete spotId description imageUrl createdAt counterExplanation",
+                  populate: {
+                        path: "spotId",
+                        model: "MarkedSpot",
+                        select: "address description category wasteCategory image coordinates",
+                  },
+            });
+
+            const rawList = Array.isArray(userStatus?.reportForme) ? userStatus.reportForme : [];
+
+            // Map and format without exposing reporting userId
+            const reports = rawList.map((item, index) => {
+                  const reportDoc = item._id && typeof item._id === "object" ? item._id : null;
+                  const reason = reportDoc?.reasonForSpot || reportDoc?.reasonForSpotComplete || "Reported for review";
+                  const spotDoc = reportDoc?.spotId && typeof reportDoc.spotId === "object" ? reportDoc.spotId : null;
+
+                  return {
+                        id: reportDoc?._id ? String(reportDoc._id) : `report-${index}`,
+                        reportId: reportDoc?._id ? String(reportDoc._id) : (item._id ? String(item._id) : null),
+                        forWhat: item.forWhat || reportDoc?.forWhat || "reportSpot",
+                        reasonForSpot: reportDoc?.reasonForSpot || null,
+                        reasonForSpotComplete: reportDoc?.reasonForSpotComplete || null,
+                        reason: reason,
+                        description: reportDoc?.description || "",
+                        imageUrl: reportDoc?.imageUrl || "",
+                        reportAt: item.reportAt || reportDoc?.createdAt || new Date(),
+                        counterExplanation: reportDoc?.counterExplanation?.explanation ? {
+                              reason: reportDoc.counterExplanation.reason || "",
+                              explanation: reportDoc.counterExplanation.explanation || "",
+                              imageUrl: reportDoc.counterExplanation.imageUrl || null,
+                              submittedAt: reportDoc.counterExplanation.submittedAt || null,
+                        } : null,
+                        spot: spotDoc ? {
+                              id: spotDoc._id ? String(spotDoc._id) : null,
+                              address: spotDoc.address || "Reported Spot",
+                              category: spotDoc.category || spotDoc.wasteCategory || "Civic Spot",
+                              image: spotDoc.image || null,
+                        } : null,
+                  };
+            }).sort((a, b) => new Date(b.reportAt).getTime() - new Date(a.reportAt).getTime());
+
+            return responseHandler(res, 200, "User Notifications", {
+                  reports,
+                  count: reports.length,
+            });
+      } catch (error) {
+            console.error("Error in getUserNotifications:", error);
+            return next(errorHandler(500, error.message || "Internal Server Error"));
+      }
+};
+
+export const submitReportExplanation = async (req, res, next) => {
+      try {
+            const userId = req.user?._id;
+            if (!userId) {
+                  return next(errorHandler(401, "Unauthorized"));
+            }
+
+            const { reportId, reason, explanation, image } = req.body || {};
+            if (!reportId) {
+                  return next(errorHandler(400, "Report ID is required"));
+            }
+            if (!explanation || !explanation.trim()) {
+                  return next(errorHandler(400, "Please describe what really happened"));
+            }
+
+            const report = await Report.findById(reportId);
+            if (!report) {
+                  return next(errorHandler(404, "Report not found"));
+            }
+
+            let imageUrl = report.counterExplanation?.imageUrl || null;
+            let imageId = report.counterExplanation?.imageId || null;
+
+            if (image && typeof image === "string" && image.startsWith("data:image")) {
+                  try {
+                        const uploadRes = await uploadToCloudinary(image, "SafaiWatch_reports");
+                        if (uploadRes) {
+                              imageUrl = typeof uploadRes === "string" ? uploadRes : uploadRes.url || uploadRes.secure_url;
+                              imageId = uploadRes.public_id || "";
+                        }
+                  } catch (imgErr) {
+                        console.error("Cloudinary upload error in submitReportExplanation:", imgErr);
+                  }
+            } else if (image && typeof image === "string" && (image.startsWith("http://") || image.startsWith("https://"))) {
+                  imageUrl = image;
+            }
+
+            report.counterExplanation = {
+                  reason: reason || "Explanation provided by marked user",
+                  explanation: explanation.trim(),
+                  imageUrl: imageUrl,
+                  imageId: imageId,
+                  submittedAt: new Date(),
+            };
+            report.updatedAt = new Date();
+
+            await report.save();
+
+            return responseHandler(res, 200, "Explanation submitted successfully", {
+                  reportId: report._id,
+                  counterExplanation: {
+                        reason: report.counterExplanation.reason,
+                        explanation: report.counterExplanation.explanation,
+                        imageUrl: report.counterExplanation.imageUrl,
+                        submittedAt: report.counterExplanation.submittedAt,
+                  },
+            });
+      } catch (error) {
+            console.error("Error in submitReportExplanation:", error);
             return next(errorHandler(500, error.message || "Internal Server Error"));
       }
 };

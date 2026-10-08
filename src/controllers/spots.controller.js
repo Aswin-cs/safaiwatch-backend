@@ -25,11 +25,21 @@ import oneTimeModel from "../../models/one-time.model.js";
  */
 const getRequesterUserId = (req) => {
       if (req.user?._id) return req.user._id.toString();
+      if (req.user?.id) return req.user.id.toString();
+      if (req.query?.userId) return req.query.userId.toString();
+      if (req.headers?.["x-user-id"]) return req.headers["x-user-id"].toString();
       try {
             const token = req.cookies?.token || (req.headers?.authorization?.startsWith("Bearer ") ? req.headers.authorization.split(" ")[1] : null);
             if (token) {
                   const decoded = jwt.verify(token, JWT_SECRET);
-                  return decoded?.userId?.toString() || decoded?.id?.toString() || null;
+                  return (
+                        decoded?.userId?.toString() ||
+                        decoded?.id?.toString() ||
+                        decoded?._id?.toString() ||
+                        decoded?.user?._id?.toString() ||
+                        decoded?.user?.id?.toString() ||
+                        null
+                  );
             }
       } catch (e) { }
       return null;
@@ -409,27 +419,7 @@ export const getMarkedSpots = async (req, res, next) => {
                   }
             }
 
-            // Verification & Ownership visibility restriction:
-            // Spots marked by other users MUST have isVerified: true to be visible in frontend.
-            // Spots marked by the requesting user themselves are visible even if unverified/pending verification.
             const requesterId = getRequesterUserId(req);
-
-            if (markedBy) {
-                  if (!requesterId || markedBy.toString() !== requesterId.toString()) {
-                        query.isVerified = true;
-                  }
-            } else {
-                  if (requesterId) {
-                        andConditions.push({
-                              $or: [
-                                    { markedBy: requesterId },
-                                    { isVerified: true },
-                              ],
-                        });
-                  } else {
-                        query.isVerified = true;
-                  }
-            }
 
             if (andConditions.length > 0) {
                   query.$and = andConditions;
@@ -444,6 +434,7 @@ export const getMarkedSpots = async (req, res, next) => {
                         .populate("markedBy", "username avatar role email")
                         .populate("isAssignedBy.assignedBy", "username avatar role email")
                         .populate("isCompletedBy.completedBy", "username avatar role email")
+                        .populate("isReportedBy.reportedBy", "username avatar role email")
                         .sort({ markedAt: -1 })
                         .skip(skip)
                         .limit(limitNum),
@@ -497,7 +488,7 @@ export const getMarkedSpots = async (req, res, next) => {
                         spotDoc.isReportedBy.some((item) => {
                               const rId = item?.reportedBy?._id
                                     ? item.reportedBy._id.toString()
-                                    : item?.reportedBy?.toString();
+                                    : (item?.reportedBy ? item.reportedBy.toString() : (item?._id ? item._id.toString() : (typeof item === "string" ? item : "")));
                               return rId && rId === requesterId;
                         })
                   );
@@ -535,7 +526,8 @@ export const getMarkedSpot = async (req, res, next) => {
             const spot = await MarkedSpot.findById(spotId)
                   .populate("markedBy", "username avatar role email")
                   .populate("isAssignedBy.assignedBy", "username avatar role email")
-                  .populate("isCompletedBy.completedBy", "username avatar role email");
+                  .populate("isCompletedBy.completedBy", "username avatar role email")
+                  .populate("isReportedBy.reportedBy", "username avatar role email");
 
             if (!spot) {
                   return next(errorHandler(404, "Marked spot not found"));
@@ -545,10 +537,6 @@ export const getMarkedSpot = async (req, res, next) => {
             const markedById = spot.markedBy?._id ? spot.markedBy._id.toString() : (spot.markedBy ? spot.markedBy.toString() : "");
             const isOwner = Boolean(requesterId && markedById && requesterId === markedById);
             const spotObj = spot.toObject ? spot.toObject() : { ...spot };
-
-            if (!isOwner && !spotObj.isVerified) {
-                  return next(errorHandler(404, "Marked spot not found"));
-            }
 
             if (!isOwner) {
                   delete spotObj.isAiVerified;
@@ -588,7 +576,7 @@ export const getMarkedSpot = async (req, res, next) => {
                   spot.isReportedBy.some((item) => {
                         const rId = item?.reportedBy?._id
                               ? item.reportedBy._id.toString()
-                              : item?.reportedBy?.toString();
+                              : (item?.reportedBy ? item.reportedBy.toString() : (item?._id ? item._id.toString() : (typeof item === "string" ? item : "")));
                         return rId && rId === requesterId;
                   })
             );
@@ -1021,7 +1009,9 @@ export const completeSpot = async (req, res, next) => {
 
             // Disallow completion if the user previously reported/contested this spot
             const hasUserReported = (spot.isReportedBy || []).some((entry) => {
-                  const rId = entry?.reportedBy?._id ? entry.reportedBy._id.toString() : entry?.reportedBy?.toString();
+                  const rId = entry?.reportedBy?._id
+                        ? entry.reportedBy._id.toString()
+                        : (entry?.reportedBy ? entry.reportedBy.toString() : (entry?._id ? entry._id.toString() : (typeof entry === "string" ? entry : "")));
                   return rId && rId === userId.toString();
             });
             if (hasUserReported) {

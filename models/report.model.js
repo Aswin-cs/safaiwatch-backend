@@ -35,6 +35,24 @@ const ReportSchema = new mongoose.Schema({
     description: {
         type: String,
     },
+    counterExplanation: {
+        reason: {
+            type: String,
+        },
+        explanation: {
+            type: String,
+        },
+        imageUrl: {
+            type: String,
+        },
+        imageId: {
+            type: String,
+        },
+        submittedAt: {
+            type: Date,
+            default: Date.now,
+        },
+    },
     createdAt: {
         type: Date,
         default: Date.now,

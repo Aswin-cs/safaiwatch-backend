@@ -6,6 +6,7 @@ import { preImageOrCodeVerification } from "./spots.controller.js";
 import { wasteVerification } from "../../utils/aiPhotoVerification.utils.js";
 import { uploadToCloudinary } from "../../utils/Cloudinaryimage.utils.js";
 import UserStatus from "../../models/userStatus.model.js";
+import { getIo } from "../../config/socketIoConfig.js";
 
 export const reportOnContestSpot = async (req, res) => {
     try {
@@ -50,7 +51,9 @@ export const reportOnContestSpot = async (req, res) => {
 
         // Prevent duplicate reporting by the same user
         const alreadyReported = Array.isArray(spot.isReportedBy) && spot.isReportedBy.some((entry) => {
-            const rId = entry?.reportedBy?._id ? entry.reportedBy._id.toString() : entry?.reportedBy?.toString();
+            const rId = entry?.reportedBy?._id
+                ? entry.reportedBy._id.toString()
+                : (entry?.reportedBy ? entry.reportedBy.toString() : (entry?._id ? entry._id.toString() : (typeof entry === "string" ? entry : "")));
             return rId && rId === userId.toString();
         });
         if (alreadyReported) {
@@ -137,7 +140,7 @@ export const reportOnContestSpot = async (req, res) => {
         const report = new Report(reportData);
         await report.save();
 
-        await MarkedSpot.findByIdAndUpdate(
+        const markspot = await MarkedSpot.findByIdAndUpdate(
             targetSpotId,
             {
                 $set: { isReported: true },
@@ -148,20 +151,82 @@ export const reportOnContestSpot = async (req, res) => {
                         reportedAt: new Date(),
                     },
                 },
-            }
-        );
+            },
+            { new: true }
+        ).populate({ path: "markedBy", select: "username" });
+
+        // Retrieve the user who originally marked the spot
+        const markedUser = markspot?.markedBy;
+        const markedUserId = markedUser?._id || markspot?.markedBy;
+        let markedUsername = markedUser?.username;
+
+        if (!markedUsername && markedUserId) {
+            const foundUser = await User.findById(markedUserId).select("username");
+            markedUsername = foundUser?.username;
+        }
+
+        // Add report details to UserStatus.reportForme for the marked user
+        if (markedUserId) {
+            await UserStatus.findOneAndUpdate(
+                { user: markedUserId },
+                {
+                    $push: {
+                        reportForme: {
+                            _id: report._id,
+                            forWhat: targetForWhat,
+                            reportAt: new Date(),
+                        },
+                    },
+                    $setOnInsert: { user: markedUserId },
+                },
+                { new: true, upsert: true }
+            );
+        }
+
+        // Update UserStatus of the reporting user
         const statusUpdate = await UserStatus.findOneAndUpdate(
             { user: userId },
             {
                 $push: {
                     reportOnContestSpots: {
                         _id: report._id,
-                        reportAt: Date.now()
+                        reportAt: Date.now(),
                     },
                 },
+                $setOnInsert: { user: userId },
             },
-            { new: true }
+            { new: true, upsert: true }
         );
+
+        // Send message / notification to frontend via Socket.IO (without exposing markedBy user ID)
+        try {
+            const io = getIo();
+            if (io) {
+                const reportNotification = {
+                    spotId: targetSpotId,
+                    reportId: report._id,
+                    forWhat: targetForWhat,
+                    reason: selectedReason || (targetForWhat === "reportSpot" ? report.reasonForSpot : report.reasonForSpotComplete),
+                    description: report.description,
+                    message: `Notice: Your marked spot has been reported for ${selectedReason || targetForWhat || "review"}.`,
+                    reportedAt: new Date(),
+                };
+
+                if (markedUsername) {
+                    io.to(`user:${markedUsername}`).to(markedUsername).emit("spot:reported", reportNotification);
+                    io.to(`user:${markedUsername}`).to(markedUsername).emit("notification", {
+                        type: "spot:reported",
+                        ...reportNotification,
+                    });
+                }
+                if (markedUserId) {
+                    io.to(`user:${markedUserId}`).to(String(markedUserId)).emit("spot:reported", reportNotification);
+                }
+            }
+        } catch (socketErr) {
+            console.error("Socket emit error for spot:reported:", socketErr);
+        }
+
         return res.status(201).json({ message: "Reported successfully", report });
     } catch (error) {
         console.error(error);
