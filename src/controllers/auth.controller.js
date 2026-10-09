@@ -114,6 +114,7 @@ export const handleGoogleCallback = async (req, res, next) => {
                         otpVerified: true,
                         avatarUrl,
                         provider: "google",
+                        for: "signIn",
                         providerId,
                         expiresAt,
                   });

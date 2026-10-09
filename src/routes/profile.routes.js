@@ -10,6 +10,7 @@ profileRouter.get('/get-my-profile', authorize(), getMyProfile);
 profileRouter.get('/history', authorize(), getUserHistory);
 profileRouter.get('/notifications', authorize(), getUserNotifications);
 profileRouter.post('/report-explanation', authorize(), submitReportExplanation);
+profileRouter.post('/counter-evidence', authorize(), submitReportExplanation);
 profileRouter.get('/rewards-history', authorize(), getUserRewardsHistory);
 profileRouter.post('/redeem-reward', authorize(), redeemReward);
 profileRouter.patch('/update', authorize(), uploadAvatarMiddleware, updateProfile);

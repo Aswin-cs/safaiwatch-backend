@@ -7,6 +7,8 @@ import { wasteVerification } from "../../utils/aiPhotoVerification.utils.js";
 import { uploadToCloudinary } from "../../utils/Cloudinaryimage.utils.js";
 import UserStatus from "../../models/userStatus.model.js";
 import { getIo } from "../../config/socketIoConfig.js";
+import { counterEvidenceSchema } from "../validators/report.validator.js";
+import { isValidOptionForClaim } from "../../utils/citizenClaims.utils.js";
 
 export const reportOnContestSpot = async (req, res) => {
     try {
@@ -233,3 +235,127 @@ export const reportOnContestSpot = async (req, res) => {
         return res.status(500).json({ message: "Internal server error" });
     }
 };
+
+/**
+ * Controller to submit Counter Evidence for a report.
+ * - Validates options using citizenClaims.utils.js
+ * - Performs Zod validation on explanation / description
+ * - Submits value to report.counterExplanation
+ * - Updates markedSpot.isSpotIsFake to true
+ */
+export const submitCounterEvidence = async (req, res) => {
+    try {
+        const userId = req.user?._id;
+        if (!userId) {
+            return res.status(401).json({ success: false, message: "Unauthorized: Please log in" });
+        }
+
+        const reportId = req.body?.reportId || req.params?.reportId || req.params?.id;
+        const reason = req.body?.reason || req.body?.option || req.body?.stance;
+        const explanation = req.body?.explanation || req.body?.description || req.body?.details;
+
+        // 1. Zod validation for description / explanation and reason
+        const validationResult = counterEvidenceSchema.safeParse({
+            reportId: reportId ? String(reportId) : "",
+            reason: reason ? String(reason) : "",
+            explanation: explanation ? String(explanation) : undefined,
+            description: req.body?.description ? String(req.body.description) : undefined,
+        });
+
+        if (!validationResult.success) {
+            const firstError = validationResult.error.issues?.[0]?.message || "Validation failed";
+            return res.status(400).json({
+                success: false,
+                message: firstError,
+                errors: validationResult.error.issues,
+            });
+        }
+
+        const { reason: validatedReason, explanation: validatedExplanation, description: validatedDescription } = validationResult.data;
+        const finalExplanation = (validatedExplanation || validatedDescription || "").trim();
+
+        if (!mongoose.Types.ObjectId.isValid(reportId)) {
+            return res.status(400).json({ success: false, message: "Invalid Report ID" });
+        }
+
+        const report = await Report.findById(reportId);
+        if (!report) {
+            return res.status(404).json({ success: false, message: "Report not found" });
+        }
+
+        const spot = await MarkedSpot.findById(report.spotId);
+        if (!spot) {
+            return res.status(404).json({ success: false, message: "Associated spot not found" });
+        }
+
+        // Authorize: user must be the markedBy user, or completed/assigned user
+        const isOwner = spot.markedBy?.toString() === userId.toString();
+        const isCompletedBy = Array.isArray(spot.isCompletedBy) && spot.isCompletedBy.some(
+            (c) => (c?.completedBy || c)?._id?.toString() === userId.toString() || (c?.completedBy || c)?.toString() === userId.toString()
+        );
+        if (!isOwner && !isCompletedBy) {
+            return res.status(403).json({
+                success: false,
+                message: "Forbidden: Only the spot creator or cleanup assignee can submit counter evidence",
+            });
+        }
+
+        // 2. Validate submitted option value using citizenClaims.utils.js
+        const claimKey = report.forWhat === "reportCompleteSpot" ? report.reasonForSpotComplete : report.reasonForSpot;
+        const isValidOption = isValidOptionForClaim(validatedReason, claimKey, report.forWhat);
+
+        if (!isValidOption) {
+            return res.status(400).json({
+                success: false,
+                message: `Invalid defense stance selected for this claim: "${validatedReason}". Please select a valid option from the list.`,
+            });
+        }
+
+        // 3. Submit value to report.counterExplanation
+        report.counterExplanation = {
+            reason: validatedReason,
+            explanation: finalExplanation,
+            submittedAt: new Date(),
+        };
+        report.updatedAt = new Date();
+        await report.save();
+
+        // 4. Update markedSpot: make isSpotIsFake true
+        await MarkedSpot.findByIdAndUpdate(
+            report.spotId,
+            {
+                $set: { isSpotIsFake: true },
+            },
+            { new: true }
+        );
+
+        // Notify via Socket.IO
+        try {
+            const io = getIo();
+            if (io) {
+                io.emit("spot:updated", { spotId: report.spotId, isSpotIsFake: true });
+                io.emit("report:countered", {
+                    reportId: report._id,
+                    spotId: report.spotId,
+                    isSpotIsFake: true,
+                });
+            }
+        } catch (socketErr) {
+            console.error("Socket emit error in submitCounterEvidence:", socketErr);
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Counter evidence submitted successfully",
+            data: {
+                reportId: report._id,
+                spotId: report.spotId,
+                counterExplanation: report.counterExplanation,
+                isSpotIsFake: true,
+            },
+        });
+    } catch (error) {
+        console.error("Error in submitCounterEvidence:", error);
+        return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    }
+};

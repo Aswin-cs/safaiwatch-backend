@@ -42,12 +42,6 @@ const ReportSchema = new mongoose.Schema({
         explanation: {
             type: String,
         },
-        imageUrl: {
-            type: String,
-        },
-        imageId: {
-            type: String,
-        },
         submittedAt: {
             type: Date,
             default: Date.now,

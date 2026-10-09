@@ -420,6 +420,50 @@ export const getMarkedSpots = async (req, res, next) => {
             }
 
             const requesterId = getRequesterUserId(req);
+            const requesterObjId = requesterId && mongoose.Types.ObjectId.isValid(requesterId)
+                  ? new mongoose.Types.ObjectId(requesterId)
+                  : null;
+
+            // Visibility rule for unverified spots:
+            // Don't show spots with isVerified === false to other users (only the marked user can see it).
+            if (requesterId) {
+                  const verifiedFilters = [
+                        { isVerified: true },
+                        { markedBy: requesterId },
+                  ];
+                  if (requesterObjId) {
+                        verifiedFilters.push({ markedBy: requesterObjId });
+                  }
+                  andConditions.push({ $or: verifiedFilters });
+            } else {
+                  andConditions.push({ isVerified: true });
+            }
+
+            // Visibility rule for reported spots:
+            // When isReported is true, only the marked user (spot.markedBy) and the reporting user (spot.isReportedBy) can see it.
+            // If isReported is false / not true, show as usual spot to all users.
+            if (requesterId) {
+                  const userFilters = [
+                        { markedBy: requesterId },
+                        { "isReportedBy.reportedBy": requesterId },
+                  ];
+                  if (requesterObjId) {
+                        userFilters.push(
+                              { markedBy: requesterObjId },
+                              { "isReportedBy.reportedBy": requesterObjId }
+                        );
+                  }
+                  andConditions.push({
+                        $or: [
+                              { isReported: { $ne: true } },
+                              ...userFilters,
+                        ],
+                  });
+            } else {
+                  andConditions.push({
+                        isReported: { $ne: true },
+                  });
+            }
 
             if (andConditions.length > 0) {
                   query.$and = andConditions;
@@ -455,7 +499,33 @@ export const getMarkedSpots = async (req, res, next) => {
                   });
             }
 
-            const sanitizedSpots = spots.map((spotDoc) => {
+            const visibleSpots = spots.filter((spotDoc) => {
+                  const markedById = spotDoc.markedBy?._id
+                        ? spotDoc.markedBy._id.toString()
+                        : spotDoc.markedBy?.toString();
+                  const isMarker = Boolean(requesterId && markedById && markedById === requesterId);
+
+                  // 1. Unverified spots rule: Don't show isVerified === false to other users
+                  if (spotDoc.isVerified === false && !isMarker) {
+                        return false;
+                  }
+
+                  // 2. Reported spots rule: If isReported === true, only marked user and reporting users can see it
+                  if (spotDoc.isReported === true) {
+                        if (!requesterId) return false;
+                        const isReporter = Array.isArray(spotDoc.isReportedBy) && spotDoc.isReportedBy.some((item) => {
+                              const rId = item?.reportedBy?._id
+                                    ? item.reportedBy._id.toString()
+                                    : (item?.reportedBy ? item.reportedBy.toString() : (item?._id ? item._id.toString() : (typeof item === "string" ? item : "")));
+                              return rId && rId === requesterId;
+                        });
+                        return isMarker || isReporter;
+                  }
+
+                  return true;
+            });
+
+            const sanitizedSpots = visibleSpots.map((spotDoc) => {
                   const markedById = spotDoc.markedBy?._id ? spotDoc.markedBy._id.toString() : spotDoc.markedBy?.toString();
                   const isOwner = Boolean(requesterId && markedById && requesterId === markedById);
                   const spotObj = spotDoc.toObject ? spotDoc.toObject() : { ...spotDoc };
@@ -580,6 +650,22 @@ export const getMarkedSpot = async (req, res, next) => {
                         return rId && rId === requesterId;
                   })
             );
+
+            // Visibility rules for single spot:
+            // 1. Don't show spots with isVerified === false to other users (only owner can view)
+            if (spot.isVerified === false && !isOwner) {
+                  return next(errorHandler(404, "Marked spot not found"));
+            }
+
+            // 2. If spot is reported, ONLY the marked user and reporting users can view it.
+            if (spot.isReported === true) {
+                  const isMarker = isOwner;
+                  const isReporter = isReportedByRequestedUser;
+                  if (!isMarker && !isReporter) {
+                        return next(errorHandler(404, "Marked spot not found"));
+                  }
+            }
+
             spotObj.hasUserReported = isReportedByRequestedUser;
             spotObj.isReportedByRequestedUser = isReportedByRequestedUser;
 
@@ -740,6 +826,11 @@ export const deleteSpot = async (req, res, next) => {
                   // 2. If the spot is completed, user cannot delete that spot
                   if (spot.isCompleted) {
                         return next(errorHandler(400, "Bad Request: Completed spots cannot be deleted"));
+                  }
+
+                  // 3. If the spot is reported, user cannot delete that spot
+                  if (spot.isReported) {
+                        return next(errorHandler(400, "Bad Request: Reported spots cannot be deleted"));
                   }
 
                   // Extract assigned user IDs from spot.isAssignedBy before deleting

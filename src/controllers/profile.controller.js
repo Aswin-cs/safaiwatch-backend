@@ -11,6 +11,7 @@ import { JWT_SECRET } from "../../config/envConfig.js";
 import jwt from "jsonwebtoken";
 import { uploadToCloudinary, deleteFromCloudinary } from "../../utils/Cloudinaryimage.utils.js";
 import { selectedRewards } from "../../utils/rewards.utils.js";
+import { submitCounterEvidence } from "./report.controller.js";
 
 /**
  * Helper to get user ID from req.user or JWT token if available
@@ -1261,14 +1262,25 @@ export const getUserNotifications = async (req, res, next) => {
                   populate: {
                         path: "spotId",
                         model: "MarkedSpot",
-                        select: "address description category wasteCategory image coordinates",
+                        select: "address description category wasteCategory image coordinates isSpotIsFake",
                   },
             });
 
             const rawList = Array.isArray(userStatus?.reportForme) ? userStatus.reportForme : [];
 
-            // Map and format without exposing reporting userId
-            const reports = rawList.map((item, index) => {
+            // Map and format without exposing reporting userId; filter out spots where isSpotIsFake is true
+            const reports = rawList
+                  .filter((item) => {
+                        const reportDoc = item._id && typeof item._id === "object" ? item._id : null;
+                        if (!reportDoc) return false;
+                        const spotDoc = reportDoc?.spotId && typeof reportDoc.spotId === "object" ? reportDoc.spotId : null;
+                        // Do not show this report notification if spot.isSpotIsFake is true
+                        if (spotDoc && spotDoc.isSpotIsFake === true) {
+                              return false;
+                        }
+                        return true;
+                  })
+                  .map((item, index) => {
                   const reportDoc = item._id && typeof item._id === "object" ? item._id : null;
                   const reason = reportDoc?.reasonForSpot || reportDoc?.reasonForSpotComplete || "Reported for review";
                   const spotDoc = reportDoc?.spotId && typeof reportDoc.spotId === "object" ? reportDoc.spotId : null;
@@ -1286,7 +1298,6 @@ export const getUserNotifications = async (req, res, next) => {
                         counterExplanation: reportDoc?.counterExplanation?.explanation ? {
                               reason: reportDoc.counterExplanation.reason || "",
                               explanation: reportDoc.counterExplanation.explanation || "",
-                              imageUrl: reportDoc.counterExplanation.imageUrl || null,
                               submittedAt: reportDoc.counterExplanation.submittedAt || null,
                         } : null,
                         spot: spotDoc ? {
@@ -1294,7 +1305,9 @@ export const getUserNotifications = async (req, res, next) => {
                               address: spotDoc.address || "Reported Spot",
                               category: spotDoc.category || spotDoc.wasteCategory || "Civic Spot",
                               image: spotDoc.image || null,
+                              isSpotIsFake: Boolean(spotDoc.isSpotIsFake),
                         } : null,
+                        isSpotIsFake: Boolean(spotDoc?.isSpotIsFake),
                   };
             }).sort((a, b) => new Date(b.reportAt).getTime() - new Date(a.reportAt).getTime());
 
@@ -1308,68 +1321,8 @@ export const getUserNotifications = async (req, res, next) => {
       }
 };
 
-export const submitReportExplanation = async (req, res, next) => {
-      try {
-            const userId = req.user?._id;
-            if (!userId) {
-                  return next(errorHandler(401, "Unauthorized"));
-            }
+export const submitReportExplanation = submitCounterEvidence;
 
-            const { reportId, reason, explanation, image } = req.body || {};
-            if (!reportId) {
-                  return next(errorHandler(400, "Report ID is required"));
-            }
-            if (!explanation || !explanation.trim()) {
-                  return next(errorHandler(400, "Please describe what really happened"));
-            }
-
-            const report = await Report.findById(reportId);
-            if (!report) {
-                  return next(errorHandler(404, "Report not found"));
-            }
-
-            let imageUrl = report.counterExplanation?.imageUrl || null;
-            let imageId = report.counterExplanation?.imageId || null;
-
-            if (image && typeof image === "string" && image.startsWith("data:image")) {
-                  try {
-                        const uploadRes = await uploadToCloudinary(image, "SafaiWatch_reports");
-                        if (uploadRes) {
-                              imageUrl = typeof uploadRes === "string" ? uploadRes : uploadRes.url || uploadRes.secure_url;
-                              imageId = uploadRes.public_id || "";
-                        }
-                  } catch (imgErr) {
-                        console.error("Cloudinary upload error in submitReportExplanation:", imgErr);
-                  }
-            } else if (image && typeof image === "string" && (image.startsWith("http://") || image.startsWith("https://"))) {
-                  imageUrl = image;
-            }
-
-            report.counterExplanation = {
-                  reason: reason || "Explanation provided by marked user",
-                  explanation: explanation.trim(),
-                  imageUrl: imageUrl,
-                  imageId: imageId,
-                  submittedAt: new Date(),
-            };
-            report.updatedAt = new Date();
-
-            await report.save();
-
-            return responseHandler(res, 200, "Explanation submitted successfully", {
-                  reportId: report._id,
-                  counterExplanation: {
-                        reason: report.counterExplanation.reason,
-                        explanation: report.counterExplanation.explanation,
-                        imageUrl: report.counterExplanation.imageUrl,
-                        submittedAt: report.counterExplanation.submittedAt,
-                  },
-            });
-      } catch (error) {
-            console.error("Error in submitReportExplanation:", error);
-            return next(errorHandler(500, error.message || "Internal Server Error"));
-      }
-};
 
 export const getProfileById = getProfileByUsername;
 
