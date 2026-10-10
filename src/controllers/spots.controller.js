@@ -24,22 +24,26 @@ import oneTimeModel from "../../models/one-time.model.js";
  * Helper to get user ID from req.user or JWT token if available
  */
 const getRequesterUserId = (req) => {
-      if (req.user?._id) return req.user._id.toString();
-      if (req.user?.id) return req.user.id.toString();
-      if (req.query?.userId) return req.query.userId.toString();
-      if (req.headers?.["x-user-id"]) return req.headers["x-user-id"].toString();
+      // req.user._id is the real MongoDB ObjectId
+      if (req.user?._id && mongoose.Types.ObjectId.isValid(req.user._id)) return req.user._id.toString();
+      // req.user.id is a virtual that returns username — do NOT use it as an ObjectId
+      // Instead, store the username so the caller can resolve it if needed
+      if (req.query?.userId && mongoose.Types.ObjectId.isValid(req.query.userId)) return req.query.userId.toString();
+      if (req.headers?.["x-user-id"] && mongoose.Types.ObjectId.isValid(req.headers["x-user-id"])) return req.headers["x-user-id"].toString();
       try {
             const token = req.cookies?.token || (req.headers?.authorization?.startsWith("Bearer ") ? req.headers.authorization.split(" ")[1] : null);
             if (token) {
                   const decoded = jwt.verify(token, JWT_SECRET);
-                  return (
-                        decoded?.userId?.toString() ||
-                        decoded?.id?.toString() ||
-                        decoded?._id?.toString() ||
-                        decoded?.user?._id?.toString() ||
-                        decoded?.user?.id?.toString() ||
-                        null
-                  );
+                  const candidates = [
+                        decoded?.userId,
+                        decoded?.id,
+                        decoded?._id,
+                        decoded?.user?._id,
+                        decoded?.user?.id,
+                  ];
+                  for (const c of candidates) {
+                        if (c && mongoose.Types.ObjectId.isValid(c)) return c.toString();
+                  }
             }
       } catch (e) { }
       return null;
@@ -1392,7 +1396,17 @@ export const getRandomGestureVerification = async (req, res, next) => {
             if (!isValidUser) {
                   return next(errorHandler(404, "User not found"));
             }
-            const userId = isValidUser._id;
+            // Ensure userId is always a valid ObjectId (not a username string)
+            let userId = isValidUser._id;
+            if (!mongoose.Types.ObjectId.isValid(userId)) {
+                  // _id might be returning the virtual username; re-fetch by username
+                  const freshUser = await User.findOne({ username: String(userId) });
+                  if (!freshUser) {
+                        return next(errorHandler(404, "User not found"));
+                  }
+                  userId = freshUser._id;
+                  isValidUser = freshUser;
+            }
             const { coordinates, markspotid, spotId } = req.body;
 
 
@@ -1477,13 +1491,11 @@ export const getRandomGestureVerification = async (req, res, next) => {
                               verificationtype: "gesture",
                               verificationGesture: imageUrl,
                               isUserCompleted: false,
-                              preCodeOrGestureForMark: {
-                                    isUserCompleted: false,
-                                    verificationtype: "gesture",
-                                    verificationGesture: imageUrl,
-                                    isCodeOrGestureVerified: false,
-                                    expectedCompletionDate: expirationDate,
-                              },
+                              "preCodeOrGestureForMark.isUserCompleted": false,
+                              "preCodeOrGestureForMark.verificationtype": "gesture",
+                              "preCodeOrGestureForMark.verificationGesture": imageUrl,
+                              "preCodeOrGestureForMark.isCodeOrGestureVerified": false,
+                              "preCodeOrGestureForMark.expectedCompletionDate": expirationDate,
                         },
                         $setOnInsert: {
                               verificationCode: randomCode,
@@ -1531,7 +1543,16 @@ export const getRandomCodeVerification = async (req, res, next) => {
             if (!isValidUser) {
                   return next(errorHandler(404, "User not found"));
             }
-            const userId = isValidUser._id;
+            // Ensure userId is always a valid ObjectId (not a username string)
+            let userId = isValidUser._id;
+            if (!mongoose.Types.ObjectId.isValid(userId)) {
+                  const freshUser = await User.findOne({ username: String(userId) });
+                  if (!freshUser) {
+                        return next(errorHandler(404, "User not found"));
+                  }
+                  userId = freshUser._id;
+                  isValidUser = freshUser;
+            }
             const { coordinates, markspotid, spotId } = req.body;
             const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
             const randomCode = Array.from(crypto.randomBytes(4), (b) => chars[b % chars.length]).join("");
