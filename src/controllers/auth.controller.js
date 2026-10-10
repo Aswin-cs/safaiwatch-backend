@@ -8,6 +8,7 @@ import { oauth2Client, SCOPES } from "../../config/oauth.js";
 import { google } from "googleapis";
 import { generateOTP } from "../../utils/otpGenerator.utils.js";
 import { uploadToCloudinary } from "../../utils/Cloudinaryimage.utils.js";
+import { sendOtpMail } from "../../utils/nodemailer.utils.js";
 
 const isProduction = NODE_ENV === 'production' || process.env.NODE_ENV === 'production';
 
@@ -351,6 +352,9 @@ const signUp = async (req, res, next) => {
             // setUncompletedProfileCookie(res, newOtp);
             await session.commitTransaction();
             session.endSession();
+
+            await sendOtpMail({ to: email, otp, purpose: "Sign Up" });
+
             return res.status(201).json({
                   success: true,
                   message: "Otp sent successfully",
@@ -383,6 +387,9 @@ const resendSignUpOtp = async (req, res, next) => {
             await Otp.findOneAndUpdate({ email }, { otp, expiresAt: Date.now() + 1000 * 60 * 10, otpVerified: false });
             await session.commitTransaction();
             session.endSession();
+
+            await sendOtpMail({ to: email, otp, purpose: "Sign Up" });
+
             return res.status(200).json({
                   success: true,
                   message: "Otp resend successfully",
@@ -415,6 +422,9 @@ const resendSignInOtp = async (req, res, next) => {
             await Otp.findOneAndUpdate({ email }, { otp, expiresAt: Date.now() + 1000 * 60 * 10, otpVerified: false });
             await session.commitTransaction();
             session.endSession();
+
+            await sendOtpMail({ to: email, otp, purpose: "Sign In" });
+
             return res.status(200).json({
                   success: true,
                   message: "Otp resend successfully",
@@ -543,6 +553,9 @@ const signIn = async (req, res, next) => {
             }
             const otp = await generateOTP();
             await Otp.create({ email, for: "signIn", otp, otpVerified: false, provider: "email", expiresAt: Date.now() + 1000 * 60 * 10 });
+
+            await sendOtpMail({ to: email, otp, purpose: "Sign In" });
+
             return res.status(200).json({
                   success: true,
                   message: "Otp sent successfully",

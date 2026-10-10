@@ -114,7 +114,7 @@ const aiVerification = async (req, verificationData, savedSpotId, action = "mark
       const userId = req.user?._id;
       (async () => {
             try {
-                  const isvalid = await aiPhotoVerification(fileInput, req.file?.mimetype || "image/jpeg", verificationData, "simulation");
+                  const isvalid = await aiPhotoVerification(fileInput, req.file?.mimetype || "image/jpeg", verificationData, "real");
                   console.log(isvalid, `AI Audit Verification Result (${action})`);
                   const isVerified = Boolean(!isvalid?.isAiOrEdited && !isvalid?.isFraudulent);
 

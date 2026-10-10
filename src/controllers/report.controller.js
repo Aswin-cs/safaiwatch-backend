@@ -133,7 +133,7 @@ export const reportOnContestSpot = async (req, res) => {
             }
         }
 
-        const aiResult = await wasteVerification(imageUrl, "simulation");
+        const aiResult = await wasteVerification(imageUrl, "real");
         if (aiResult) {
             if (aiResult.isFraudulent) {
                 await User.findByIdAndUpdate(
@@ -199,7 +199,7 @@ export const reportOnContestSpot = async (req, res) => {
                         reportedAt: new Date(),
                     },
                 },
-              }
+            }
             : {
                 $set: { isReported: true },
                 $push: {
@@ -209,7 +209,7 @@ export const reportOnContestSpot = async (req, res) => {
                         reportedAt: new Date(),
                     },
                 },
-              };
+            };
 
         const markspot = await MarkedSpot.findByIdAndUpdate(
             targetSpotId,
@@ -280,7 +280,7 @@ export const reportOnContestSpot = async (req, res) => {
                     },
                 },
                 $setOnInsert: { user: userId },
-              }
+            }
             : {
                 $push: {
                     reportOnContestSpots: {
@@ -289,7 +289,7 @@ export const reportOnContestSpot = async (req, res) => {
                     },
                 },
                 $setOnInsert: { user: userId },
-              };
+            };
 
         await UserStatus.findOneAndUpdate(
             { user: userId },
@@ -539,4 +539,4 @@ export const submitCounterEvidence = async (req, res) => {
         console.error("Error in submitCounterEvidence:", error);
         return res.status(500).json({ success: false, message: error.message || "Internal server error" });
     }
-};
+};

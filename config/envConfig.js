@@ -16,4 +16,6 @@ export const CLOUDINARY_API_KEY = cleanEnv(process.env.CLOUDINARY_API_KEY);
 export const CLOUDINARY_API_SECRET = cleanEnv(process.env.CLOUDINARY_API_SECRET);
 export const GEMINI_API_KEY = cleanEnv(process.env.GEMINI_API_KEY);
 export const GEMINI_MODEL = cleanEnv(process.env.GEMINI_MODEL) || "gemini-3.6-flash";
-
+export const GMAIL_USER = cleanEnv(process.env.GMAIL_USER);
+export const GMAIL_APP_PASSWORD = cleanEnv(process.env.GMAIL_APP_PASSWORD)?.replace(/\s+/g, "");
+export const EMAIL_FROM_NAME = cleanEnv(process.env.EMAIL_FROM_NAME) || "SafaiWatch";
