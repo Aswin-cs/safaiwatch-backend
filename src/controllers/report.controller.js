@@ -329,6 +329,66 @@ export const submitCounterEvidence = async (req, res) => {
             { new: true }
         );
 
+        // 5. Check claim rules for BlackListCount on markedBy user:
+        // - already_cleaned / fake_or_ai: always increment BlackListCount for marked user
+        // - wrong_location / inaccessible: increment BlackListCount only if user already has BlackListCount > 0; otherwise do not mark anything
+        // - other_spam: increment BlackListCount for both marked user and reporting user
+        let updatedBlackListCount;
+        const markedUserId = spot.markedBy?._id || spot.markedBy || userId;
+
+        if (claimKey === "already_cleaned" || claimKey === "fake_or_ai") {
+            const updatedStatus = await UserStatus.findOneAndUpdate(
+                { $or: [{ user: markedUserId }, { userId: markedUserId }] },
+                {
+                    $inc: { BlackListCount: 1 },
+                    $setOnInsert: { user: markedUserId },
+                },
+                { new: true, upsert: true }
+            );
+            if (updatedStatus) {
+                updatedBlackListCount = updatedStatus.BlackListCount;
+            }
+        } else if (claimKey === "wrong_location" || claimKey === "wrong_cleaned_location" || claimKey === "inaccessible") {
+            const updatedStatus = await UserStatus.findOneAndUpdate(
+                {
+                    $or: [{ user: markedUserId }, { userId: markedUserId }],
+                    BlackListCount: { $gt: 0 },
+                },
+                {
+                    $inc: { BlackListCount: 1 },
+                },
+                { new: true }
+            );
+            if (updatedStatus) {
+                updatedBlackListCount = updatedStatus.BlackListCount;
+            }
+        } else if (claimKey === "other_spam") {
+            // Increment BlackListCount by 1 both for marked user and reported user (report.userId)
+            const updatedStatus = await UserStatus.findOneAndUpdate(
+                { $or: [{ user: markedUserId }, { userId: markedUserId }] },
+                {
+                    $inc: { BlackListCount: 1 },
+                    $setOnInsert: { user: markedUserId },
+                },
+                { new: true, upsert: true }
+            );
+            if (updatedStatus) {
+                updatedBlackListCount = updatedStatus.BlackListCount;
+            }
+
+            const reportingUserId = report.userId;
+            if (reportingUserId) {
+                await UserStatus.findOneAndUpdate(
+                    { $or: [{ user: reportingUserId }, { userId: reportingUserId }] },
+                    {
+                        $inc: { BlackListCount: 1 },
+                        $setOnInsert: { user: reportingUserId },
+                    },
+                    { new: true, upsert: true }
+                );
+            }
+        }
+
         // Notify via Socket.IO
         try {
             const io = getIo();
@@ -352,6 +412,7 @@ export const submitCounterEvidence = async (req, res) => {
                 spotId: report.spotId,
                 counterExplanation: report.counterExplanation,
                 isSpotIsFake: true,
+                ...(updatedBlackListCount !== undefined && { BlackListCount: updatedBlackListCount }),
             },
         });
     } catch (error) {

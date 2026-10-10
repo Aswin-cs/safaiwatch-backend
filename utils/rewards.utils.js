@@ -270,11 +270,12 @@ const getYYYYMMDD = (d) => {
 const streaksCalculated = async (user) => {
       const userId = user?.user_id || user?._id || user?.id || user;
       try {
-            const [userStatus, userRewards, dbMarkedSpots, dbCompletedSpots] = await Promise.all([
+            const [userStatus, userRewards, dbMarkedSpots, dbCompletedSpots, dbAssignedSpots] = await Promise.all([
                   UserStatus.findOne({ $or: [{ user: userId }, { userId }] }),
                   UserRewards.findOne({ $or: [{ user: userId }, { userId }] }),
-                  MarkedSpot.find({ markedBy: userId }).select("markedAt createdAt"),
+                  MarkedSpot.find({ markedBy: userId, "preCodeOrGestureForMark.isUserCompleted": { $ne: false } }).select("markedAt createdAt"),
                   MarkedSpot.find({ "isCompletedBy.completedBy": userId }).select("isCompletedBy createdAt"),
+                  MarkedSpot.find({ "isAssignedBy.assignedBy": userId }).select("isAssignedBy createdAt"),
             ]);
 
             let targetRewards = userRewards;
@@ -284,26 +285,19 @@ const streaksCalculated = async (user) => {
 
             const activeDatesSet = new Set();
 
-            // 1. Process activeDays from userRewards
-            if (Array.isArray(targetRewards.activeDays)) {
-                  targetRewards.activeDays.forEach((d) => {
-                        const str = getYYYYMMDD(d);
-                        if (str) activeDatesSet.add(str);
-                  });
-            }
-
-            // 2. Process MarkedSpot records
+            // 1. Process MarkedSpot records (User marked a spot)
             (dbMarkedSpots || []).forEach((s) => {
                   const dt = s.markedAt || s.createdAt;
                   const str = getYYYYMMDD(dt);
                   if (str) activeDatesSet.add(str);
             });
 
-            // 3. Process CompletedSpot records
+            // 2. Process CompletedSpot records (User completed a spot)
             (dbCompletedSpots || []).forEach((s) => {
                   if (Array.isArray(s.isCompletedBy)) {
                         s.isCompletedBy.forEach((c) => {
-                              if (String(c.completedBy) === String(userId) && c.completedAt) {
+                              const completerId = String(c.completedBy?._id || c.completedBy || "");
+                              if (completerId === String(userId) && c.completedAt) {
                                     const str = getYYYYMMDD(c.completedAt);
                                     if (str) activeDatesSet.add(str);
                               }
@@ -311,12 +305,21 @@ const streaksCalculated = async (user) => {
                   }
             });
 
-            // 4. Process UserStatus activity
-            if (userStatus) {
-                  if (userStatus.lastActiveAt) {
-                        const str = getYYYYMMDD(userStatus.lastActiveAt);
-                        if (str) activeDatesSet.add(str);
+            // 3. Process AssignedSpot records (User claimed / assigned a spot)
+            (dbAssignedSpots || []).forEach((s) => {
+                  if (Array.isArray(s.isAssignedBy)) {
+                        s.isAssignedBy.forEach((a) => {
+                              const assigneeId = String(a.assignedBy?._id || a.assignedBy || "");
+                              if (assigneeId === String(userId) && a.assignedAt) {
+                                    const str = getYYYYMMDD(a.assignedAt);
+                                    if (str) activeDatesSet.add(str);
+                              }
+                        });
                   }
+            });
+
+            // 4. Process UserStatus spot activity records (marked, assigned, completed history)
+            if (userStatus) {
                   (userStatus.MarkedSpots || []).forEach((s) => {
                         const str = getYYYYMMDD(s?.markedAt);
                         if (str) activeDatesSet.add(str);
@@ -333,14 +336,18 @@ const streaksCalculated = async (user) => {
 
             const now = new Date();
             const todayStr = getYYYYMMDD(now);
-            activeDatesSet.add(todayStr); // Register today's action
 
             // Convert set to array of sorted date strings (ascending)
             const sortedDates = Array.from(activeDatesSet).filter(Boolean).sort();
 
             // Calculate current streak backward from today
+            // If the user has not done spot activity today yet, check starting from yesterday
             let currentStreak = 0;
             let checkDate = new Date(now);
+
+            if (!activeDatesSet.has(todayStr)) {
+                  checkDate.setDate(checkDate.getDate() - 1);
+            }
 
             while (true) {
                   const checkStr = getYYYYMMDD(checkDate);
