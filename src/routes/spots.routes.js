@@ -12,7 +12,7 @@ import {
       getRandomCodeVerification,
       deleteOneTimeVerification,
 } from "../controllers/spots.controller.js";
-import { reportOnContestSpot, submitCounterEvidence } from "../controllers/report.controller.js";
+import { reportOnContestSpot, reportCleanup, submitCounterEvidence } from "../controllers/report.controller.js";
 import { authorize } from "../middlewares/authorize.middleware.js";
 import { verifySpotLocation } from "../middlewares/location.middleware.js";
 import multer from "multer";
@@ -55,7 +55,7 @@ spotsRouter.patch(
       "/:id/complete",
       authorize("Hybrid", "Coordinator", "hybrid", "coordinator"),
       upload.single("imageAfter"),
-      verifySpotLocation(5),
+      // verifySpotLocation(5),
       completeSpot
 );
 spotsRouter.patch("/:id/rate", authorize(), rateSpot);
@@ -64,6 +64,8 @@ spotsRouter.patch("/:id/rate", authorize(), rateSpot);
 spotsRouter.post("/:id/report", authorize(), upload.any(), reportOnContestSpot);
 spotsRouter.post("/:id/contest", authorize(), upload.any(), reportOnContestSpot);
 spotsRouter.post("/report", authorize(), upload.any(), reportOnContestSpot);
+spotsRouter.post("/:id/report-cleanup", authorize(), upload.any(), reportCleanup);
+spotsRouter.post("/report-cleanup", authorize(), upload.any(), reportCleanup);
 spotsRouter.post("/:id/counter-evidence", authorize(), submitCounterEvidence);
 spotsRouter.post("/counter-evidence", authorize(), submitCounterEvidence);
 

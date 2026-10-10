@@ -1424,11 +1424,25 @@ export const getRandomGestureVerification = async (req, res, next) => {
             const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
             const randomCode = Array.from(crypto.randomBytes(4), (b) => chars[b % chars.length]).join("");
 
-            // 1. Action "complete" / "contest" / "reportSpot" -> Stores in OneTime model
-            if (action === "complete" || action === "reportSpot" || action === "contest" || action === "report") {
+            // 1. Action "complete" / "contest" / "reportSpot" / "reportCleanup" -> Stores in OneTime model
+            const isOneTimeGestureAction = [
+                  "complete",
+                  "reportSpot",
+                  "contest",
+                  "report",
+                  "reportCleanup",
+                  "reportCleanUp",
+                  "reportCompleteSpot",
+            ].includes(action) || [
+                  "reportCompleteSpot",
+                  "reportCleanup",
+                  "reportCleanUp",
+            ].includes(req.body?.forWhat);
+
+            if (isOneTimeGestureAction) {
                   const targetSpotId = markspotid || spotId || req.body?.markspotid || req.body?.spotId || req.params?.id || req.body?.id || req.query?.markspotid || req.query?.spotId || req.query?.id;
                   if (!targetSpotId || !mongoose.Types.ObjectId.isValid(targetSpotId)) {
-                        return next(errorHandler(400, "Valid spot ID is required for completion verification"));
+                        return next(errorHandler(400, "Valid spot ID is required for verification"));
                   }
 
                   const targetSpot = await MarkedSpot.findById(targetSpotId);
@@ -1439,13 +1453,29 @@ export const getRandomGestureVerification = async (req, res, next) => {
                         return next(errorHandler(400, "Spot has already been completed"));
                   }
 
+                  const isReportCleanup = action === "reportCleanup" || action === "reportCleanUp" || action === "reportCompleteSpot" || req.body?.forWhat === "reportCompleteSpot" || req.body?.forWhat === "reportCleanup" || req.body?.forWhat === "reportCleanUp" || (targetSpot.isCompleted && (action === "contest" || action === "report"));
+
+                  if (isReportCleanup) {
+                        if (!targetSpot.isCompleted) {
+                              return next(errorHandler(400, "Cannot report cleanup on a spot that is not marked as completed"));
+                        }
+                        if (!targetSpot.isVerified) {
+                              return next(errorHandler(400, "Cannot report cleanup on an unverified spot"));
+                        }
+                        if (targetSpot.isReported) {
+                              return next(errorHandler(400, "Cannot report cleanup on a spot that has already been reported/contested"));
+                        }
+                  }
+
+                  const forWhatType = action === "complete" ? "completeSpot" : (isReportCleanup ? "reportCleanUp" : "reportSpot");
+
                   const oneTimeVerification = await oneTimeModel.findOneAndUpdate(
                         { user: userId, markspotid: targetSpotId },
                         {
                               $set: {
                                     user: userId,
                                     markspotid: targetSpotId,
-                                    forWhat: action === "complete" ? "completeSpot" : "reportSpot",
+                                    forWhat: forWhatType,
                                     guestureImage: imageUrl,
                                     expirationDate,
                               },
@@ -1562,11 +1592,25 @@ export const getRandomCodeVerification = async (req, res, next) => {
             }
             const expirationDate = new Date(Date.now() + 5 * 60 * 1000);
 
-            // 1. Action "complete" / "contest" / "reportSpot" -> Stores in OneTime model
-            if (action === "complete" || action === "reportSpot" || action === "contest" || action === "report") {
+            // 1. Action "complete" / "contest" / "reportSpot" / "reportCleanup" -> Stores in OneTime model
+            const isOneTimeCodeAction = [
+                  "complete",
+                  "reportSpot",
+                  "contest",
+                  "report",
+                  "reportCleanup",
+                  "reportCleanUp",
+                  "reportCompleteSpot",
+            ].includes(action) || [
+                  "reportCompleteSpot",
+                  "reportCleanup",
+                  "reportCleanUp",
+            ].includes(req.body?.forWhat);
+
+            if (isOneTimeCodeAction) {
                   const targetSpotId = markspotid || spotId || req.body?.markspotid || req.body?.spotId || req.params?.id || req.body?.id || req.query?.markspotid || req.query?.spotId || req.query?.id;
                   if (!targetSpotId || !mongoose.Types.ObjectId.isValid(targetSpotId)) {
-                        return next(errorHandler(400, "Valid spot ID is required for completion verification"));
+                        return next(errorHandler(400, "Valid spot ID is required for verification"));
                   }
 
                   const targetSpot = await MarkedSpot.findById(targetSpotId);
@@ -1577,6 +1621,22 @@ export const getRandomCodeVerification = async (req, res, next) => {
                         return next(errorHandler(400, "Spot has already been completed"));
                   }
 
+                  const isReportCleanup = action === "reportCleanup" || action === "reportCleanUp" || action === "reportCompleteSpot" || req.body?.forWhat === "reportCompleteSpot" || req.body?.forWhat === "reportCleanup" || req.body?.forWhat === "reportCleanUp" || (targetSpot.isCompleted && (action === "contest" || action === "report"));
+
+                  if (isReportCleanup) {
+                        if (!targetSpot.isCompleted) {
+                              return next(errorHandler(400, "Cannot report cleanup on a spot that is not marked as completed"));
+                        }
+                        if (!targetSpot.isVerified) {
+                              return next(errorHandler(400, "Cannot report cleanup on an unverified spot"));
+                        }
+                        if (targetSpot.isReported) {
+                              return next(errorHandler(400, "Cannot report cleanup on a spot that has already been reported/contested"));
+                        }
+                  }
+
+                  const forWhatType = action === "complete" ? "completeSpot" : (isReportCleanup ? "reportCleanUp" : "reportSpot");
+
                   const oneTimeVerification = await oneTimeModel.findOneAndUpdate(
                         { user: userId, markspotid: targetSpotId },
                         {
@@ -1584,7 +1644,7 @@ export const getRandomCodeVerification = async (req, res, next) => {
                                     user: userId,
                                     markspotid: targetSpotId,
                                     code: randomCode,
-                                    forWhat: action === "complete" ? "completeSpot" : "reportSpot",
+                                    forWhat: forWhatType,
                                     expirationDate,
                               },
                         },
@@ -1687,19 +1747,35 @@ export const preImageOrCodeVerification = async (req, target = "mark") => {
             throw errorHandler(400, "Coordinator cannot perform this action");
       }
 
-      // 1. Completion / Contest / Report Action: Verify against OneTime model
-      if (
-            target === "complete" ||
-            target === "report" ||
-            target === "contest" ||
-            req.body?.action === "complete" ||
-            req.body?.action === "reportSpot" ||
-            req.body?.action === "contest" ||
-            req.body?.action === "report"
-      ) {
+      // 1. Completion / Contest / Report / ReportCleanup Action: Verify against OneTime model
+      const isOneTimeTarget = [
+            "complete",
+            "report",
+            "contest",
+            "reportCleanup",
+            "reportCleanUp",
+            "reportCompleteSpot",
+            "reportSpot"
+      ].includes(target) || [
+            "complete",
+            "reportSpot",
+            "contest",
+            "report",
+            "reportCleanup",
+            "reportCleanUp",
+            "reportCompleteSpot"
+      ].includes(req.body?.action) || [
+            "reportSpot",
+            "reportCompleteSpot",
+            "reportCleanup",
+            "reportCleanUp",
+            "completeSpot"
+      ].includes(req.body?.forWhat);
+
+      if (isOneTimeTarget) {
             const oneTimeDoc = await oneTimeModel.findById(verificationId);
             if (!oneTimeDoc) {
-                  throw errorHandler(404, "Invalid or expired completion verification ID");
+                  throw errorHandler(404, "Invalid or expired verification ID");
             }
 
             if (oneTimeDoc.expirationDate && new Date(oneTimeDoc.expirationDate).getTime() < Date.now()) {

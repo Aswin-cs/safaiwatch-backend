@@ -13,7 +13,7 @@ const oneTimeSchema = new mongoose.Schema({
       },
       forWhat: {
             type: String,
-            enum: ["completeSpot", "reportSpot", "reportCleanUp"]
+            enum: ["completeSpot", "reportSpot", "reportCleanUp", "reportCleanup", "reportCompleteSpot"]
       },
       image: {
             type: String,

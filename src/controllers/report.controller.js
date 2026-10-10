@@ -51,18 +51,56 @@ export const reportOnContestSpot = async (req, res) => {
             return res.status(404).json({ message: "Spot not found" });
         }
 
-        // Prevent duplicate reporting by the same user
-        const alreadyReported = Array.isArray(spot.isReportedBy) && spot.isReportedBy.some((entry) => {
-            const rId = entry?.reportedBy?._id
-                ? entry.reportedBy._id.toString()
-                : (entry?.reportedBy ? entry.reportedBy.toString() : (entry?._id ? entry._id.toString() : (typeof entry === "string" ? entry : "")));
-            return rId && rId === userId.toString();
-        });
-        if (alreadyReported) {
-            return res.status(400).json({ message: "You have already reported/contested this spot." });
+        const isCleanupReport =
+            forWhat === "reportCompleteSpot" ||
+            forWhat === "reportCleanup" ||
+            forWhat === "reportCleanUp" ||
+            which === "reportCompleteSpot" ||
+            which === "reportCleanup" ||
+            which === "reportCleanUp" ||
+            req.body?.action === "reportCleanup" ||
+            req.body?.action === "reportCleanUp" ||
+            req.body?.action === "reportCompleteSpot" ||
+            Boolean(req.path && req.path.includes("report-cleanup")) ||
+            (spot.isCompleted && forWhat !== "reportSpot");
+
+        if (isCleanupReport) {
+            if (!spot.isCompleted) {
+                return res.status(400).json({ message: "Cannot report cleanup on a spot that is not marked as completed" });
+            }
+            if (!spot.isVerified) {
+                return res.status(400).json({ message: "Cannot report cleanup on an unverified spot" });
+            }
+            if (spot.isReported) {
+                return res.status(400).json({ message: "Cannot report cleanup on a spot that has already been reported/contested" });
+            }
+
+            // Prevent duplicate reporting by the same user on completed spot
+            const alreadyReportedOnComplete = Array.isArray(spot.isReportedOnComplete) && spot.isReportedOnComplete.some((entry) => {
+                const rId = entry?.reportedBy?._id
+                    ? entry.reportedBy._id.toString()
+                    : (entry?.reportedBy ? entry.reportedBy.toString() : (entry?._id ? entry._id.toString() : (typeof entry === "string" ? entry : "")));
+                return rId && rId === userId.toString();
+            });
+            if (alreadyReportedOnComplete) {
+                return res.status(400).json({
+                    message: "You have already registered an objection against this cleanup submission."
+                });
+            }
+        } else {
+            // Prevent duplicate reporting by the same user on marked spot
+            const alreadyReported = Array.isArray(spot.isReportedBy) && spot.isReportedBy.some((entry) => {
+                const rId = entry?.reportedBy?._id
+                    ? entry.reportedBy._id.toString()
+                    : (entry?.reportedBy ? entry.reportedBy.toString() : (entry?._id ? entry._id.toString() : (typeof entry === "string" ? entry : "")));
+                return rId && rId === userId.toString();
+            });
+            if (alreadyReported) {
+                return res.status(400).json({ message: "You have already reported/contested this spot." });
+            }
         }
 
-        const data = await preImageOrCodeVerification(req, "report");
+        const data = await preImageOrCodeVerification(req, isCleanupReport ? "reportCleanup" : "report");
 
         // Process image upload if provided in req.file, req.files, or req.body
         let imageUrl = bodyImageUrl || "";
@@ -120,8 +158,19 @@ export const reportOnContestSpot = async (req, res) => {
             }
         }
 
-        const targetForWhat = forWhat || which || "reportSpot";
-        const selectedReason = reason || (targetForWhat === "reportSpot" ? reasonForSpot : reasonForSpotComplete);
+        const cleanupReasonAliases = {
+            fake_photo: "fake_or_ai",
+            not_cleaned: "not_completed",
+            wrong_location: "wrong_cleaned_location",
+            incomplete_cleanup: "not_completed",
+            other_fraud: "other_spam",
+        };
+
+        const targetForWhat = isCleanupReport ? "reportCompleteSpot" : (forWhat || which || "reportSpot");
+        const rawReason = reason || (isCleanupReport ? reasonForSpotComplete : reasonForSpot);
+        const selectedReason = isCleanupReport
+            ? (cleanupReasonAliases[rawReason] || rawReason || "other_spam")
+            : (rawReason || "other_spam");
 
         const reportData = {
             userId,
@@ -132,19 +181,26 @@ export const reportOnContestSpot = async (req, res) => {
             imageId,
         };
 
-        if (targetForWhat === "reportSpot") {
-            reportData.reasonForSpot = selectedReason || reasonForSpot || "other_spam";
-        } else if (targetForWhat === "reportCompleteSpot") {
-            reportData.reasonForSpotComplete = selectedReason || reasonForSpotComplete || "other_spam";
+        if (isCleanupReport) {
+            reportData.reasonForSpotComplete = selectedReason;
+        } else {
+            reportData.reasonForSpot = selectedReason;
         }
-
 
         const report = new Report(reportData);
         await report.save();
 
-        const markspot = await MarkedSpot.findByIdAndUpdate(
-            targetSpotId,
-            {
+        const spotUpdateQuery = isCleanupReport
+            ? {
+                $push: {
+                    isReportedOnComplete: {
+                        reportedBy: userId,
+                        ReportProb: report._id,
+                        reportedAt: new Date(),
+                    },
+                },
+              }
+            : {
                 $set: { isReported: true },
                 $push: {
                     isReportedBy: {
@@ -153,24 +209,49 @@ export const reportOnContestSpot = async (req, res) => {
                         reportedAt: new Date(),
                     },
                 },
-            },
+              };
+
+        const markspot = await MarkedSpot.findByIdAndUpdate(
+            targetSpotId,
+            spotUpdateQuery,
             { new: true }
-        ).populate({ path: "markedBy", select: "username" });
+        )
+            .populate({ path: "markedBy", select: "username" })
+            .populate({ path: "isCompletedBy.completedBy", select: "username" });
 
-        // Retrieve the user who originally marked the spot
-        const markedUser = markspot?.markedBy;
-        const markedUserId = markedUser?._id || markspot?.markedBy;
-        let markedUsername = markedUser?.username;
+        // Identify the accused user whose submission is being reported
+        let targetAccusedUserId = null;
+        let targetAccusedUsername = null;
 
-        if (!markedUsername && markedUserId) {
-            const foundUser = await User.findById(markedUserId).select("username");
-            markedUsername = foundUser?.username;
+        if (isCleanupReport) {
+            const lastCompletion = Array.isArray(markspot?.isCompletedBy) && markspot.isCompletedBy.length > 0
+                ? markspot.isCompletedBy[markspot.isCompletedBy.length - 1]
+                : null;
+            const completedUser = lastCompletion?.completedBy;
+            targetAccusedUserId = completedUser?._id || completedUser;
+            targetAccusedUsername = completedUser?.username;
+
+            if (!targetAccusedUsername && targetAccusedUserId) {
+                const foundUser = await User.findById(targetAccusedUserId).select("username");
+                targetAccusedUsername = foundUser?.username;
+            }
         }
 
-        // Add report details to UserStatus.reportForme for the marked user
-        if (markedUserId) {
+        if (!targetAccusedUserId) {
+            const markedUser = markspot?.markedBy;
+            targetAccusedUserId = markedUser?._id || markspot?.markedBy;
+            targetAccusedUsername = markedUser?.username;
+
+            if (!targetAccusedUsername && targetAccusedUserId) {
+                const foundUser = await User.findById(targetAccusedUserId).select("username");
+                targetAccusedUsername = foundUser?.username;
+            }
+        }
+
+        // Add report details to UserStatus.reportForme for the accused user
+        if (targetAccusedUserId) {
             await UserStatus.findOneAndUpdate(
-                { user: markedUserId },
+                { user: targetAccusedUserId },
                 {
                     $push: {
                         reportForme: {
@@ -179,16 +260,28 @@ export const reportOnContestSpot = async (req, res) => {
                             reportAt: new Date(),
                         },
                     },
-                    $setOnInsert: { user: markedUserId },
+                    $setOnInsert: { user: targetAccusedUserId },
                 },
                 { new: true, upsert: true }
             );
         }
 
         // Update UserStatus of the reporting user
-        const statusUpdate = await UserStatus.findOneAndUpdate(
-            { user: userId },
-            {
+        const reporterUpdateQuery = isCleanupReport
+            ? {
+                $push: {
+                    reportOnCompletedSpots: {
+                        _id: report._id,
+                        reportAt: Date.now(),
+                    },
+                    reportOnContestSpots: {
+                        _id: report._id,
+                        reportAt: Date.now(),
+                    },
+                },
+                $setOnInsert: { user: userId },
+              }
+            : {
                 $push: {
                     reportOnContestSpots: {
                         _id: report._id,
@@ -196,11 +289,15 @@ export const reportOnContestSpot = async (req, res) => {
                     },
                 },
                 $setOnInsert: { user: userId },
-            },
+              };
+
+        await UserStatus.findOneAndUpdate(
+            { user: userId },
+            reporterUpdateQuery,
             { new: true, upsert: true }
         );
 
-        // Send message / notification to frontend via Socket.IO (without exposing markedBy user ID)
+        // Send message / notification to frontend via Socket.IO
         try {
             const io = getIo();
             if (io) {
@@ -208,32 +305,55 @@ export const reportOnContestSpot = async (req, res) => {
                     spotId: targetSpotId,
                     reportId: report._id,
                     forWhat: targetForWhat,
-                    reason: selectedReason || (targetForWhat === "reportSpot" ? report.reasonForSpot : report.reasonForSpotComplete),
+                    reason: selectedReason,
                     description: report.description,
-                    message: `Notice: Your marked spot has been reported for ${selectedReason || targetForWhat || "review"}.`,
+                    message: isCleanupReport
+                        ? `Notice: Your cleanup submission has been reported for ${selectedReason || "review"}.`
+                        : `Notice: Your marked spot has been reported for ${selectedReason || targetForWhat || "review"}.`,
                     reportedAt: new Date(),
                 };
 
-                if (markedUsername) {
-                    io.to(`user:${markedUsername}`).to(markedUsername).emit("spot:reported", reportNotification);
-                    io.to(`user:${markedUsername}`).to(markedUsername).emit("notification", {
-                        type: "spot:reported",
+                const eventName = isCleanupReport ? "cleanup:reported" : "spot:reported";
+
+                if (targetAccusedUsername) {
+                    io.to(`user:${targetAccusedUsername}`).to(targetAccusedUsername).emit(eventName, reportNotification);
+                    io.to(`user:${targetAccusedUsername}`).to(targetAccusedUsername).emit("notification", {
+                        type: eventName,
                         ...reportNotification,
                     });
+                    if (eventName !== "spot:reported") {
+                        io.to(`user:${targetAccusedUsername}`).to(targetAccusedUsername).emit("spot:reported", reportNotification);
+                    }
                 }
-                if (markedUserId) {
-                    io.to(`user:${markedUserId}`).to(String(markedUserId)).emit("spot:reported", reportNotification);
+                if (targetAccusedUserId) {
+                    io.to(`user:${targetAccusedUserId}`).to(String(targetAccusedUserId)).emit(eventName, reportNotification);
+                    if (eventName !== "spot:reported") {
+                        io.to(`user:${targetAccusedUserId}`).to(String(targetAccusedUserId)).emit("spot:reported", reportNotification);
+                    }
                 }
             }
         } catch (socketErr) {
-            console.error("Socket emit error for spot:reported:", socketErr);
+            console.error("Socket emit error for report notification:", socketErr);
         }
 
-        return res.status(201).json({ message: "Reported successfully", report });
+        return res.status(201).json({
+            success: true,
+            message: isCleanupReport ? "Cleanup reported successfully" : "Reported successfully",
+            report
+        });
     } catch (error) {
-        console.error(error);
+        console.error("Error in reportOnContestSpot:", error);
         return res.status(500).json({ message: "Internal server error" });
     }
+};
+
+/**
+ * Controller to report / contest a completed cleanup submission.
+ */
+export const reportCleanup = async (req, res) => {
+    if (!req.body) req.body = {};
+    req.body.forWhat = "reportCompleteSpot";
+    return reportOnContestSpot(req, res);
 };
 
 /**

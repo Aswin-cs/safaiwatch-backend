@@ -8,7 +8,7 @@ const ReportSchema = new mongoose.Schema({
     },
     forWhat: {
         type: String,
-        enum: ["reportSpot", "reportCompleteSpot"],
+        enum: ["reportSpot", "reportCompleteSpot", "reportCleanup", "reportCleanUp"],
         required: true,
     },
     spotId: {
@@ -29,7 +29,17 @@ const ReportSchema = new mongoose.Schema({
     },
     reasonForSpotComplete: {
         type: String,
-        enum: ["fake_or_ai", "not_completed", "wrong_cleaned_location", "other_spam"],
+        enum: [
+            "fake_or_ai",
+            "not_completed",
+            "wrong_cleaned_location",
+            "other_spam",
+            "fake_photo",
+            "not_cleaned",
+            "wrong_location",
+            "incomplete_cleanup",
+            "other_fraud",
+        ],
         // required: true,
     },
     description: {

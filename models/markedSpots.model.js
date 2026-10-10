@@ -216,6 +216,26 @@ const markedSpotsSchema = new mongoose.Schema(
                   ],
                   default: null
             },
+            isReportedOnComplete: {
+                  type: [
+                        {
+                              reportedBy: {
+                                    type: mongoose.Schema.Types.ObjectId,
+                                    ref: 'User',
+                              },
+                              ReportProb: {
+                                    type: mongoose.Schema.Types.ObjectId,
+                                    ref: 'Report',
+                              },
+                              reportedAt: {
+                                    type: Date,
+                                    default: Date.now
+                              }
+
+                        }
+                  ],
+                  default: null
+            },
             isCompletedVerify: {
                   type: String,
                   enum: ["pending", "completed", "uncompleted"],
