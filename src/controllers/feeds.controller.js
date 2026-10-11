@@ -74,7 +74,15 @@ export const getAllPosts = async (req, res, next) => {
 
             const formattedPosts = (posts || []).map((post) => {
                   const postObj = post.toObject ? post.toObject() : { ...post };
-                  postObj.isLiked = likedPostIdsSet.has(post._id.toString());
+                  let isLiked = false;
+                  if (resolvedUserId) {
+                        const isLikedInPost = Array.isArray(post.userWhoLiked) && post.userWhoLiked.some((item) => {
+                              const uid = item?.userId?._id || item?.userId || item;
+                              return uid && uid.toString() === resolvedUserId.toString();
+                        });
+                        isLiked = Boolean(isLikedInPost || likedPostIdsSet.has(post._id.toString()));
+                  }
+                  postObj.isLiked = isLiked;
                   return postObj;
             });
 
@@ -160,14 +168,24 @@ export const getParticularPost = async (req, res, next) => {
             postObj.isLiked = false;
 
             if (resolvedUserId) {
-                  const userStatus = await UserStatus.findOne({
-                        $or: [{ user: resolvedUserId }, { userId: resolvedUserId }],
+                  // Verify if requesting user is in post.userWhoLiked
+                  const isLikedInPost = Array.isArray(post.userWhoLiked) && post.userWhoLiked.some((item) => {
+                        const uid = item?.userId?._id || item?.userId || item;
+                        return uid && uid.toString() === resolvedUserId.toString();
                   });
-                  if (userStatus && Array.isArray(userStatus.userLikePosts)) {
-                        postObj.isLiked = userStatus.userLikePosts.some((item) => {
-                              const pid = item?.postId?._id || item?.postId || item;
-                              return pid && pid.toString() === postId.toString();
+
+                  if (isLikedInPost) {
+                        postObj.isLiked = true;
+                  } else {
+                        const userStatus = await UserStatus.findOne({
+                              $or: [{ user: resolvedUserId }, { userId: resolvedUserId }],
                         });
+                        if (userStatus && Array.isArray(userStatus.userLikePosts)) {
+                              postObj.isLiked = userStatus.userLikePosts.some((item) => {
+                                    const pid = item?.postId?._id || item?.postId || item;
+                                    return pid && pid.toString() === postId.toString();
+                              });
+                        }
                   }
             }
 
@@ -228,18 +246,35 @@ export const getLikeToPost = async (req, res, next) => {
                   userStatus = new UserStatus({ user: userId });
             }
 
+            if (!Array.isArray(post.userWhoLiked)) {
+                  post.userWhoLiked = [];
+            }
+
             const existingLikeIndex = userStatus.userLikePosts.findIndex(
                   (item) => item.postId && item.postId.toString() === postId.toString()
             );
 
+            const existingPostLikeIndex = post.userWhoLiked.findIndex(
+                  (item) => (item.userId && item.userId.toString() === userId.toString()) || item.toString() === userId.toString()
+            );
+
             let isLiked = false;
-            if (existingLikeIndex > -1) {
-                  userStatus.userLikePosts.splice(existingLikeIndex, 1);
+            if (existingLikeIndex > -1 || existingPostLikeIndex > -1) {
+                  if (existingLikeIndex > -1) {
+                        userStatus.userLikePosts.splice(existingLikeIndex, 1);
+                  }
+                  if (existingPostLikeIndex > -1) {
+                        post.userWhoLiked.splice(existingPostLikeIndex, 1);
+                  }
                   post.likeCount = Math.max(0, (post.likeCount || 0) - 1);
                   isLiked = false;
             } else {
                   userStatus.userLikePosts.push({
                         postId: postId,
+                        likedAt: new Date(),
+                  });
+                  post.userWhoLiked.push({
+                        userId: userId,
                         likedAt: new Date(),
                   });
                   post.likeCount = (post.likeCount || 0) + 1;

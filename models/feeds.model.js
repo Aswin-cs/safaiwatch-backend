@@ -43,6 +43,21 @@ export const feedsSchema = new mongoose.Schema({
             type: Number,
             default: 0
       },
+      userWhoLiked: {
+            type: [
+                  {
+                        userId: {
+                              type: mongoose.Schema.Types.ObjectId,
+                              ref: 'User'
+                        },
+                        likedAt: {
+                              type: Date,
+                              default: Date.now
+                        }
+                  }
+            ]
+
+      },
       createdAt: {
             type: Date,
             default: Date.now
