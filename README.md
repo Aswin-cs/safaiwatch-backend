@@ -4,7 +4,7 @@ SafaiWatch is an AI-powered community sanitation and cleanliness management plat
 
 ---
 
-## 🚀 Tech Stack
+## Tech Stack
 
 - **Runtime & Framework**: [Node.js](https://nodejs.org/) (ES Modules) & [Express.js 5](https://expressjs.com/)
 - **Database**: [MongoDB](https://www.mongodb.com/) via [Mongoose](https://mongoosejs.com/)
@@ -18,7 +18,7 @@ SafaiWatch is an AI-powered community sanitation and cleanliness management plat
 
 ---
 
-## 📁 Project Architecture
+## Project Architecture
 
 ```plaintext
 backend/
@@ -72,7 +72,7 @@ backend/
 
 ---
 
-## ⚙️ Environment Variables
+## Environment Variables
 
 Create a `.env` file in the root of the `backend` directory based on `.env.example`:
 
@@ -103,7 +103,7 @@ Fill in the required configuration variables:
 
 ---
 
-## 🛠️ Installation & Getting Started
+## Installation & Getting Started
 
 ### Prerequisites
 
@@ -136,9 +136,9 @@ The server will be available at `http://localhost:4000` (or your configured `POR
 
 ---
 
-## 🌐 API Endpoints Reference
+## API Endpoints Reference
 
-### 🔐 Authentication (`/api/v1/auth`)
+### Authentication (`/api/v1/auth`)
 
 | Method | Endpoint | Description | Access |
 | :--- | :--- | :--- | :--- |
@@ -158,7 +158,7 @@ The server will be available at `http://localhost:4000` (or your configured `POR
 
 ---
 
-### 📍 Spot Management (`/api/v1/spots`)
+### Spot Management (`/api/v1/spots`)
 
 | Method | Endpoint | Description | Access |
 | :--- | :--- | :--- | :--- |
@@ -179,7 +179,7 @@ The server will be available at `http://localhost:4000` (or your configured `POR
 
 ---
 
-### 👤 Profile & User Activity (`/api/v1/profile`)
+### Profile & User Activity (`/api/v1/profile`)
 
 | Method | Endpoint | Description | Access |
 | :--- | :--- | :--- | :--- |
@@ -195,7 +195,7 @@ The server will be available at `http://localhost:4000` (or your configured `POR
 
 ---
 
-### 🎁 Rewards & Gamification (`/api/v1/rewards`)
+### Rewards & Gamification (`/api/v1/rewards`)
 
 | Method | Endpoint | Description | Access |
 | :--- | :--- | :--- | :--- |
@@ -207,7 +207,7 @@ The server will be available at `http://localhost:4000` (or your configured `POR
 
 ---
 
-### 📰 Community Feed (`/api/v1/feeds`)
+### Community Feed (`/api/v1/feeds`)
 
 | Method | Endpoint | Description | Access |
 | :--- | :--- | :--- | :--- |
@@ -217,7 +217,7 @@ The server will be available at `http://localhost:4000` (or your configured `POR
 
 ---
 
-## ⚡ Real-Time Features (Socket.IO)
+## Real-Time Features (Socket.IO)
 
 The backend runs a Socket.IO server alongside Express on the same HTTP server port.
 
@@ -227,7 +227,7 @@ The backend runs a Socket.IO server alongside Express on the same HTTP server po
 
 ---
 
-## ⏰ Background Cron Jobs
+## Background Cron Jobs
 
 Configured using `node-cron` in `src/app.js`:
 - **Every 5 Minutes (`*/5 * * * *`)**:
@@ -236,7 +236,7 @@ Configured using `node-cron` in `src/app.js`:
 
 ---
 
-## 🔒 Security & Best Practices
+## Security & Best Practices
 
 - **Role-Based Access Control (RBAC)**: Fine-grained permissions for `Civilian`, `Coordinator`, and `Hybrid` roles via `authorize.middleware.js`.
 - **Anti-Spoofing & Liveness**: Verifies camera captures using unpredictable gestures and randomized codes analyzed by Google Gemini AI Vision.
