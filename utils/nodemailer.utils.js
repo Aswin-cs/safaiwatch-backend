@@ -186,7 +186,7 @@ export const sendEmail = async ({ to, subject, html, text, from }) => {
             };
       } catch (error) {
             console.error(`[Gmail] Failed to send email to ${recipients}:`, error.message);
-            throw new Error(`Email sending failed: ${error.message}`);
+            // throw new Error(`Email sending failed: ${error.message}`);
       }
 };
 
