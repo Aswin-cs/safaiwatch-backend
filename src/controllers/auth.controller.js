@@ -539,22 +539,24 @@ const signIn = async (req, res, next) => {
             const user = await User.findOne({ email });
 
             if (!user) {
-                  return res.status(404).json({
-                        success: false,
-                        message: "User not found",
-                  });
+                  // return res.status(404).json({
+                  //       success: false,
+                  //       message: "User not found",
+                  // });
             }
             const existingOtpUser = await Otp.findOne({ email });
             if (existingOtpUser) {
-                  return res.status(404).json({
-                        success: false,
-                        message: "Invalid",
-                  });
+                  await Otp.deleteOne({ email });
+                  // return res.status(404).json({
+                  //       success: false,
+                  //       message: "Invalid",
+                  // });
             }
             const otp = await generateOTP();
             await Otp.create({ email, for: "signIn", otp, otpVerified: false, provider: "email", expiresAt: Date.now() + 1000 * 60 * 10 });
-
-            await sendOtpMail({ to: email, otp, purpose: "Sign In" });
+            (async () => {
+                  await sendOtpMail({ to: email, otp, purpose: "Sign In" });
+            })();
 
             return res.status(200).json({
                   success: true,
