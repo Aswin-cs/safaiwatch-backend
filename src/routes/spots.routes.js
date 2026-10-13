@@ -55,17 +55,17 @@ spotsRouter.patch(
       "/:id/complete",
       authorize("Hybrid", "Coordinator", "hybrid", "coordinator"),
       upload.single("imageAfter"),
-      // verifySpotLocation(5),
+      verifySpotLocation(5),
       completeSpot
 );
 spotsRouter.patch("/:id/rate", authorize(), rateSpot);
 
 // Dispute & Contest Report routes
-spotsRouter.post("/:id/report", authorize(), upload.any(), reportOnContestSpot);
-spotsRouter.post("/:id/contest", authorize(), upload.any(), reportOnContestSpot);
-spotsRouter.post("/report", authorize(), upload.any(), reportOnContestSpot);
-spotsRouter.post("/:id/report-cleanup", authorize(), upload.any(), reportCleanup);
-spotsRouter.post("/report-cleanup", authorize(), upload.any(), reportCleanup);
+spotsRouter.post("/:id/report", authorize(), upload.any(), verifySpotLocation(5), reportOnContestSpot);
+spotsRouter.post("/:id/contest", authorize(), upload.any(), verifySpotLocation(5), reportOnContestSpot);
+spotsRouter.post("/report", authorize(), upload.any(), verifySpotLocation(5), reportOnContestSpot);
+spotsRouter.post("/:id/report-cleanup", authorize(), upload.any(), verifySpotLocation(5), reportCleanup);
+spotsRouter.post("/report-cleanup", authorize(), upload.any(), verifySpotLocation(5), reportCleanup);
 spotsRouter.post("/:id/counter-evidence", authorize(), submitCounterEvidence);
 spotsRouter.post("/counter-evidence", authorize(), submitCounterEvidence);
 
